@@ -227,10 +227,10 @@
   <div class="panel" data-step="STEP 02 — 本機資料夾">
     <div class="panel-body">
       <h2>選擇你整理好的圖片資料夾</h2>
-      <p class="hint">選你手動下載/整理的圖片資料夾。工具只會讀取檔名（含子資料夾路徑），不會讀取圖片內容，也不會上傳。</p>
+      <p class="hint">選擇專案根資料夾。工具會讀取檔名（含子資料夾路徑），不會上傳；若資料夾內有 <code>assets/passionfruit</code>，下載時會自動寫入該位置。</p>
       <div class="row">
         <label class="file-input-label">
-          <button type="button" id="pickFolderBtn">選擇資料夾</button>
+          <button type="button" id="pickFolderBtn">選擇專案資料夾</button>
           <input type="file" id="folderInput" webkitdirectory directory multiple />
         </label>
         <button id="clearFolderBtn" class="secondary">清空</button>
@@ -245,7 +245,7 @@
       <p class="hint">先完成上面兩步再按比對。比對會自動檢查所有缺漏項目是否仍存在：圖片用載入測試、音檔用播放測試。仍可下載會標示「缺」；載不出來代表 404／官方已下架，會標示「404」並加上刪除線。</p>
       <div class="row">
         <button id="compareBtn" disabled>執行比對</button>
-        <button id="pickDownloadFolderBtn" class="secondary">選擇下載根資料夾</button>
+        <button id="pickDownloadFolderBtn" class="secondary">使用 assets/passionfruit</button>
         <button id="downloadAllBtn" disabled>一鍵下載全部缺漏檔案</button>
         <button id="downloadBatchBtn" class="secondary" disabled>下載批次下載器 (.cmd)</button>
         <button id="copyMissingBtn" class="secondary" disabled>複製缺漏清單</button>
@@ -302,7 +302,8 @@
   let missingResults = [];          // array of required path strings currently missing
   let missingStatus = [];           // parallel array: null | 'alive' | 'gone' (set by the availability checker)
   let lastTotal = 0, lastMatched = 0; // snapshot from the most recent compare run
-  let downloadFolderHandle = null;  // File System Access API 的使用者選定根資料夾（只留在本次頁面）
+  let localFolderHandle = null;       // 第二步選取的專案根資料夾，可用來自動定位 assets/passionfruit
+  let downloadFolderHandle = null;    // 實際寫入目標（預設使用 assets/passionfruit）
 
   const logInput = document.getElementById('logInput');
   const parseBtn = document.getElementById('parseBtn');
@@ -340,17 +341,39 @@
     return parts;
   }
 
+  async function useDefaultDownloadFolder(){
+    if(!localFolderHandle) return false;
+    try{
+      const assets = await localFolderHandle.getDirectoryHandle('assets');
+      const passionfruit = await assets.getDirectoryHandle('passionfruit');
+      let permission = await passionfruit.queryPermission({ mode: 'readwrite' });
+      if(permission === 'prompt') permission = await passionfruit.requestPermission({ mode: 'readwrite' });
+      if(permission !== 'granted') return false;
+      downloadFolderHandle = passionfruit;
+      pickDownloadFolderBtn.textContent = '下載資料夾：assets/passionfruit';
+      return true;
+    }catch(err){
+      return false;
+    }
+  }
+
   async function pickDownloadFolder(){
+    if(await useDefaultDownloadFolder()){
+      checkStat.textContent = '已自動使用第二步資料夾中的 assets/passionfruit';
+      return true;
+    }
     if(!window.showDirectoryPicker){
-      checkStat.textContent = '這個瀏覽器不支援指定資料夾；將使用一般下載方式';
-      return;
+      checkStat.textContent = '找不到 assets/passionfruit，且這個瀏覽器不支援手動指定下載資料夾';
+      return false;
     }
     try{
       downloadFolderHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
       pickDownloadFolderBtn.textContent = '下載資料夾：' + downloadFolderHandle.name;
-      checkStat.textContent = '已選擇「' + downloadFolderHandle.name + '」，下載時會自動建立正確子資料夾';
+      checkStat.textContent = '找不到第二步資料夾中的 assets/passionfruit，已改用手動選擇的資料夾';
+      return true;
     }catch(err){
       if(err && err.name !== 'AbortError') checkStat.textContent = '無法取得資料夾寫入權限：' + err.message;
+      return false;
     }
   }
 
@@ -473,8 +496,32 @@
     if(e.key === 'Enter') addManualPath();
   });
 
-  pickFolderBtn.addEventListener('click', function(){
-    folderInput.click();
+  async function readFolderHandle(folder, prefix){
+    const files = [];
+    for await(const entry of folder.values()){
+      const relPath = prefix ? prefix + '/' + entry.name : entry.name;
+      if(entry.kind === 'file') files.push({ name: entry.name.toLowerCase(), relPath: relPath.toLowerCase() });
+      else if(entry.kind === 'directory') files.push(...await readFolderHandle(entry, relPath));
+    }
+    return files;
+  }
+
+  pickFolderBtn.addEventListener('click', async function(){
+    if(!window.showDirectoryPicker){
+      // 舊瀏覽器只能讀檔名，不能取得稍後自動寫入所需的資料夾 handle。
+      folderInput.click();
+      return;
+    }
+    try{
+      localFolderHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+      localFiles = await readFolderHandle(localFolderHandle, '');
+      folderStat.innerHTML = '已讀取 <b>' + localFolderHandle.name + '</b>，共 <b>' + localFiles.length + '</b> 個檔案；下載時會優先使用 <b>assets/passionfruit</b>';
+      downloadFolderHandle = null;
+      pickDownloadFolderBtn.textContent = '使用 assets/passionfruit';
+      updateCompareEnabled();
+    }catch(err){
+      if(err && err.name !== 'AbortError') folderStat.textContent = '讀取資料夾失敗：' + err.message;
+    }
   });
 
   folderInput.addEventListener('change', function(e){
@@ -487,12 +534,18 @@
       return { name: f.name.toLowerCase(), relPath: relNoRoot.toLowerCase() };
     });
     folderStat.innerHTML = '已讀取資料夾，共 <b>' + localFiles.length + '</b> 個檔案';
+    localFolderHandle = null;
+    downloadFolderHandle = null;
+    pickDownloadFolderBtn.textContent = '使用 assets/passionfruit';
     updateCompareEnabled();
   });
 
   clearFolderBtn.addEventListener('click', function(){
     localFiles = [];
+    localFolderHandle = null;
+    downloadFolderHandle = null;
     folderInput.value = '';
+    pickDownloadFolderBtn.textContent = '使用 assets/passionfruit';
     folderStat.textContent = '已清空';
     updateCompareEnabled();
   });
@@ -780,7 +833,8 @@
     downloadAllBtn.disabled = true;
     let done = 0, ok = 0;
     const manualFallback = [];
-    const usesSelectedFolder = Boolean(downloadFolderHandle);
+    // 下載時一律先嘗試第二步選定專案內的 assets/passionfruit；找不到才讓使用者選擇。
+    const usesSelectedFolder = downloadFolderHandle ? true : await pickDownloadFolder();
 
     for(const { p } of targets){
       const url = base + '/' + p;
