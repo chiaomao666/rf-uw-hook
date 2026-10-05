@@ -1,0 +1,858 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<title>圖資缺漏檢查工具</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans+TC:wght@400;500;600&display=swap');
+
+  :root{
+    --bg:#12140f;
+    --panel:#1a1d15;
+    --panel-2:#1f2318;
+    --line:#333827;
+    --amber:#d9a441;
+    --amber-dim:#8a6a2e;
+    --teal:#4f7a6b;
+    --paper:#e8e4d5;
+    --muted:#8b9284;
+    --danger:#c9553d;
+    --ok:#6f9b5c;
+    --mono:'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace;
+    --sans:'IBM Plex Sans TC','IBM Plex Sans', system-ui, sans-serif;
+  }
+
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--paper);font-family:var(--sans);}
+
+  body{
+    background-image:
+      linear-gradient(var(--line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size:28px 28px;
+    background-position:-1px -1px;
+    min-height:100vh;
+  }
+
+  .wrap{max-width:960px;margin:0 auto;padding:32px 20px 80px;}
+
+  header{
+    display:flex;align-items:baseline;justify-content:space-between;
+    border-bottom:1px solid var(--line);
+    padding-bottom:16px;margin-bottom:24px;
+    gap:16px;flex-wrap:wrap;
+  }
+  header .tag{
+    font-family:var(--mono);font-size:11px;letter-spacing:.14em;
+    color:var(--amber-dim);text-transform:uppercase;
+  }
+  h1{
+    font-family:var(--mono);font-weight:700;font-size:22px;letter-spacing:.02em;
+    margin:4px 0 0;color:var(--paper);
+  }
+  h1 span{color:var(--amber);}
+  .sub{font-size:13px;color:var(--muted);margin-top:4px;max-width:60ch;line-height:1.6;}
+
+  .panel{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:2px;
+    margin-bottom:18px;
+    position:relative;
+  }
+  .panel::before{
+    content:attr(data-step);
+    position:absolute;top:-11px;left:16px;
+    background:var(--bg);padding:0 8px;
+    font-family:var(--mono);font-size:11px;color:var(--amber);
+    letter-spacing:.1em;
+  }
+  .panel-body{padding:22px 18px 18px;}
+  .panel h2{
+    font-family:var(--mono);font-size:14px;margin:0 0 6px;color:var(--paper);
+    display:flex;align-items:center;gap:8px;
+  }
+  .panel p.hint{font-size:12.5px;color:var(--muted);margin:0 0 14px;line-height:1.7;}
+
+  textarea{
+    width:100%;min-height:150px;resize:vertical;
+    background:#0e0f0b;color:var(--paper);
+    border:1px solid var(--line);border-radius:2px;
+    font-family:var(--mono);font-size:12px;line-height:1.6;
+    padding:12px;
+  }
+  textarea:focus{outline:1px solid var(--amber);outline-offset:0;}
+
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px;}
+
+  button{
+    font-family:var(--mono);font-size:12.5px;letter-spacing:.03em;
+    background:var(--panel-2);color:var(--paper);
+    border:1px solid var(--amber-dim);border-radius:2px;
+    padding:9px 16px;cursor:pointer;
+    transition:background .15s, border-color .15s, color .15s;
+  }
+  button:hover{background:var(--amber);border-color:var(--amber);color:#161810;}
+  button:disabled{opacity:.35;cursor:not-allowed;}
+  button:disabled:hover{background:var(--panel-2);color:var(--paper);border-color:var(--amber-dim);}
+  button.secondary{border-color:var(--line);}
+  button.secondary:hover{background:var(--teal);border-color:var(--teal);color:#0e130f;}
+  button.danger-btn:hover{background:var(--danger);border-color:var(--danger);color:#160c0a;}
+
+  input[type="text"]{
+    background:#0e0f0b;color:var(--paper);
+    border:1px solid var(--line);border-radius:2px;
+    font-family:var(--mono);font-size:12.5px;
+    padding:8px 10px;min-width:280px;
+  }
+  input[type="text"]:focus{outline:1px solid var(--amber);}
+
+  .stat{
+    font-family:var(--mono);font-size:12px;color:var(--muted);
+    display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;
+  }
+  .stat b{color:var(--amber);font-weight:600;}
+
+  .file-input-label{
+    display:inline-block;
+  }
+  #folderInput{display:none;}
+
+  /* coverage meter — signature element */
+  .meter-wrap{
+    margin:22px 0 6px;
+  }
+  .meter-head{
+    display:flex;justify-content:space-between;align-items:baseline;
+    font-family:var(--mono);font-size:12px;color:var(--muted);margin-bottom:6px;
+  }
+  .meter-head .pct{font-size:26px;color:var(--amber);font-weight:700;}
+  .meter{
+    height:10px;background:#0e0f0b;border:1px solid var(--line);border-radius:1px;
+    overflow:hidden;position:relative;
+  }
+  .meter-fill{
+    height:100%;width:0%;
+    background:repeating-linear-gradient(45deg, var(--ok), var(--ok) 6px, #5c8a4c 6px, #5c8a4c 12px);
+    transition:width .6s ease;
+  }
+  .meter-fill.has-missing{
+    background:repeating-linear-gradient(45deg, var(--amber), var(--amber) 6px, #b8862f 6px, #b8862f 12px);
+  }
+
+  .list{
+    margin-top:14px;max-height:340px;overflow:auto;
+    border:1px solid var(--line);border-radius:2px;background:#0e0f0b;
+  }
+  .list-row{
+    display:flex;align-items:center;gap:10px;
+    font-family:var(--mono);font-size:12px;
+    padding:7px 12px;border-bottom:1px solid #1b1e14;
+  }
+  .list-row:last-child{border-bottom:none;}
+  .list-row .badge{
+    font-size:10px;padding:1px 6px;border-radius:2px;letter-spacing:.05em;
+    flex-shrink:0;
+  }
+  .badge.miss{background:rgba(201,85,61,.16);color:var(--danger);border:1px solid rgba(201,85,61,.4);}
+  .badge.ok{background:rgba(111,155,92,.14);color:var(--ok);border:1px solid rgba(111,155,92,.35);}
+  .badge.gone{background:rgba(139,146,132,.16);color:var(--muted);border:1px solid rgba(139,146,132,.4);}
+  .badge.checking{background:rgba(217,164,65,.14);color:var(--amber);border:1px solid rgba(217,164,65,.4);}
+  .list-row.is-gone .path{color:var(--muted);text-decoration:line-through;}
+  .list-row.is-gone a{pointer-events:none;opacity:.4;}
+  .list-row.is-opened a{color:var(--amber);}
+  .list-row.is-opened .badge{background:rgba(217,164,65,.14);color:var(--amber);border:1px solid rgba(217,164,65,.4);}
+  .list-row.is-done{opacity:.4;}
+  .list-row.is-done .path{text-decoration:line-through;}
+  .list-row .done-btn{
+    font-family:var(--mono);font-size:10.5px;background:transparent;
+    border:1px solid var(--line);color:var(--muted);border-radius:2px;
+    padding:2px 7px;cursor:pointer;flex-shrink:0;
+  }
+  .list-row .done-btn:hover{border-color:var(--ok);color:var(--ok);}
+  .list-row.is-done .done-btn{border-color:var(--ok);color:var(--ok);}
+  .list-row .path{color:var(--paper);word-break:break-all;flex:1;}
+  .list-row a{color:var(--teal);text-decoration:none;flex-shrink:0;}
+  .list-row a:hover{color:var(--amber);text-decoration:underline;}
+
+  .empty{
+    padding:20px;text-align:center;color:var(--muted);font-family:var(--mono);font-size:12px;
+  }
+
+  footer{
+    margin-top:26px;font-family:var(--mono);font-size:11px;color:var(--amber-dim);
+    text-align:center;letter-spacing:.05em;
+  }
+
+  ::-webkit-scrollbar{width:9px;height:9px;}
+  ::-webkit-scrollbar-track{background:#0e0f0b;}
+  ::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px;}
+  ::-webkit-scrollbar-thumb:hover{background:var(--amber-dim);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <div class="tag">Local asset audit / 純本機比對，不上傳任何資料</div>
+      <h1>圖資<span>缺漏</span>檢查工具</h1>
+      <div class="sub">貼上側錄到的封包內容 → 選擇本機圖片資料夾 → 比對出哪些資源還沒下載過。全部在瀏覽器裡跑，不會把任何內容送出去。</div>
+    </div>
+  </header>
+
+  <div class="panel" data-step="STEP 01 — 側錄資料">
+    <div class="panel-body">
+      <h2>貼上 uw_hook.js 側錄的內容</h2>
+      <p class="hint">從 DevTools 主控台把攔截到的大型封包（[UW] [發現大型資料包...] 那幾行含 JSON 的內容）整段複製貼到下面，可以貼多次側錄結果、貼多段都沒關係，工具會自動去重複。</p>
+      <textarea id="logInput" placeholder='例如：[UW] [發現大型資料包！長度: 15234] {"topic":"...","payload":{"pool":[{"icon":"units/tank_01.png",...}]}}'></textarea>
+      <div class="row">
+        <button id="parseBtn">解析圖資清單</button>
+        <label class="file-input-label">
+          <button type="button" id="uploadTxtBtn" class="secondary">上傳側錄檔案 (.txt)</button>
+          <input type="file" id="txtFileInput" accept=".txt,text/plain" style="display:none;" />
+        </label>
+        <button id="clearLogBtn" class="secondary">清空</button>
+        <input type="text" id="baseUrl" value="https://media.komisureiya.com" title="遠端圖資網域，比對缺漏時會用來組出完整網址" />
+      </div>
+      <div class="stat" id="parseStat">已內建 <b>1</b> 筆固定資源（uwbg.png，直接寫死在 main.js 裡的，不靠側錄）</div>
+      <div class="row" style="margin-top:14px; border-top:1px solid var(--line); padding-top:14px;">
+        <input type="text" id="manualPathInput" placeholder="例如：images/uw/uwbg.png（可貼完整網址或相對路徑）" style="flex:1; min-width:260px;" />
+        <button id="manualAddBtn" class="secondary">手動加入單筆項目</button>
+      </div>
+      <div class="stat" id="manualAddStat"></div>
+    </div>
+  </div>
+
+  <div class="panel" data-step="STEP 02 — 本機資料夾">
+    <div class="panel-body">
+      <h2>選擇你整理好的圖片資料夾</h2>
+      <p class="hint">選你手動下載/整理的圖片資料夾。工具只會讀取檔名（含子資料夾路徑），不會讀取圖片內容，也不會上傳。</p>
+      <div class="row">
+        <label class="file-input-label">
+          <button type="button" id="pickFolderBtn">選擇資料夾</button>
+          <input type="file" id="folderInput" webkitdirectory directory multiple />
+        </label>
+        <button id="clearFolderBtn" class="secondary">清空</button>
+      </div>
+      <div class="stat" id="folderStat"></div>
+    </div>
+  </div>
+
+  <div class="panel" data-step="STEP 03 — 比對結果">
+    <div class="panel-body">
+      <h2>比對</h2>
+      <p class="hint">先完成上面兩步再按比對。比對邏輯：只要檔名（或完整相對路徑）在本機資料夾裡找得到，就視為「已快取」。比對完之後可以按「檢查缺漏項目是否仍存在」，工具會逐一嘗試載入每個缺漏項目的網址（圖片用載入測試，音檔用播放測試），載得出來代表仍可下載（標示「缺」），載不出來代表該資源已經 404/ 官方已下架（標示「404」，並會用刪除線標記）。</p>
+      <div class="row">
+        <button id="compareBtn" disabled>執行比對</button>
+        <button id="checkAliveBtn" class="secondary" disabled>檢查缺漏項目是否仍存在</button>
+        <button id="pickDownloadFolderBtn" class="secondary">選擇下載根資料夾</button>
+        <button id="downloadAllBtn" disabled>一鍵下載全部缺漏檔案</button>
+        <button id="copyMissingBtn" class="secondary" disabled>複製缺漏清單</button>
+        <button id="downloadMissingBtn" class="secondary" disabled>下載缺漏清單 (.txt)</button>
+      </div>
+      <div class="stat" id="checkStat"></div>
+      <p class="hint" style="margin:8px 0 0;">先按「選擇下載根資料夾」一次後，工具會依圖資相對路徑自動建立並寫入子資料夾，例如 <code>images/actor/gif/xxx.gif</code>、<code>audio/actor_prototype/xxx.mp3</code>，不會把全部檔案混在同一層。此功能需要 Chrome／Edge 且用 <code>https://</code> 或 <code>http://localhost</code> 開啟。未選擇或瀏覽器不支援時，會退回一般瀏覽器下載。能不能自動抓取仍取決於圖資伺服器是否允許 CORS；不允許的項目會整理成手動另存清單。已確認 404 的項目會自動略過。</p>
+      <p class="hint" style="margin:6px 0 0;">💡 如果你是直接用 <code>file://</code> 開這個頁面（網址列開頭是 file:///），瀏覽器會把來源視為 <code>null</code>，這種情況下自動下載幾乎一定會失敗。如果想試試看能不能讓自動下載成功，可以改用本機伺服器開啟這個工具，例如在資料夾內開終端機執行 <code>python -m http.server 8000</code>，再用瀏覽器開 <code>http://localhost:8000/asset_check.html</code>——如果圖資伺服器本身允許任意來源的 CORS（很多圖床/CDN 為了讓其他網站可以嵌入圖片會這樣設定），這樣就有機會讓大部分檔案自動下載成功，不用再手動一張一張另存。</p>
+
+      <div class="meter-wrap" id="meterWrap" style="display:none;">
+        <div class="meter-head">
+          <span>本機快取覆蓋率</span>
+          <span class="pct" id="pctText">0%</span>
+        </div>
+        <div class="meter"><div class="meter-fill" id="meterFill"></div></div>
+      </div>
+
+      <div class="meter-wrap" id="adjMeterWrap" style="display:none;">
+        <div class="meter-head">
+          <span>扣除已下架(404)後的覆蓋率</span>
+          <span class="pct" id="adjPctText">0%</span>
+        </div>
+        <div class="meter"><div class="meter-fill" id="adjMeterFill"></div></div>
+      </div>
+
+      <div class="stat" id="compareStat"></div>
+
+      <div id="resultsWrap" style="display:none;">
+        <div class="row" style="margin-top:18px;">
+          <button id="nextMissingBtn" class="secondary">開啟下一筆缺漏檔案</button>
+          <span id="nextMissingLabel" style="font-family:var(--mono);font-size:11.5px;color:var(--muted);"></span>
+        </div>
+        <div class="list" id="missingList"></div>
+      </div>
+    </div>
+  </div>
+
+  <footer>本工具僅在瀏覽器本機執行，不會將任何側錄內容或檔案清單傳送到外部伺服器</footer>
+</div>
+
+<script>
+(function(){
+  const MEDIA_EXT = /(png|jpe?g|gif|webp|svg|avif|bmp|mp3|ogg|wav|m4a|aac|opus|uw)/i;
+  // token like path/to/file.ext , allow letters/numbers/_/-/./  (unicode-safe for filenames)
+  const pathRegex = /[A-Za-z0-9_\-\.\/]+\.(?:png|jpe?g|gif|webp|svg|avif|bmp|mp3|ogg|wav|m4a|aac|opus|uw)/gi;
+  const keyRegex = /"(?:image|icon|avatar|portrait|asset|pic(?:ture)?|photo|thumbnail|banner|logo|sprite|texture|audio|music|sound|voice|bgm|se)[A-Za-z0-9_]*"\s*:\s*"([^"]+)"/gi;
+
+  // 從 main.js 原始碼裡直接找到、寫死呼叫遠端下載的固定資源（不依賴側錄，工具一開就內建）
+  const KNOWN_HARDCODED_ASSETS = [
+    'images/uw/uwbg.png'
+  ];
+  let requiredAssets = new Set(KNOWN_HARDCODED_ASSETS);   // normalized path strings, e.g. "units/tank_01.png"
+  let localFiles = [];              // {name, relPath} both lowercased for matching
+  let missingResults = [];          // array of required path strings currently missing
+  let missingStatus = [];           // parallel array: null | 'alive' | 'gone' (set by the availability checker)
+  let lastTotal = 0, lastMatched = 0; // snapshot from the most recent compare run
+  let downloadFolderHandle = null;  // File System Access API 的使用者選定根資料夾（只留在本次頁面）
+
+  const logInput = document.getElementById('logInput');
+  const parseBtn = document.getElementById('parseBtn');
+  const clearLogBtn = document.getElementById('clearLogBtn');
+  const parseStat = document.getElementById('parseStat');
+  const baseUrlInput = document.getElementById('baseUrl');
+
+  const pickFolderBtn = document.getElementById('pickFolderBtn');
+  const folderInput = document.getElementById('folderInput');
+  const clearFolderBtn = document.getElementById('clearFolderBtn');
+  const folderStat = document.getElementById('folderStat');
+
+  const compareBtn = document.getElementById('compareBtn');
+  const checkAliveBtn = document.getElementById('checkAliveBtn');
+  const checkStat = document.getElementById('checkStat');
+  const downloadAllBtn = document.getElementById('downloadAllBtn');
+  const pickDownloadFolderBtn = document.getElementById('pickDownloadFolderBtn');
+  const copyMissingBtn = document.getElementById('copyMissingBtn');
+  const downloadMissingBtn = document.getElementById('downloadMissingBtn');
+  const compareStat = document.getElementById('compareStat');
+  const meterWrap = document.getElementById('meterWrap');
+  const meterFill = document.getElementById('meterFill');
+  const pctText = document.getElementById('pctText');
+  const adjMeterWrap = document.getElementById('adjMeterWrap');
+  const adjMeterFill = document.getElementById('adjMeterFill');
+  const adjPctText = document.getElementById('adjPctText');
+  const resultsWrap = document.getElementById('resultsWrap');
+  const missingList = document.getElementById('missingList');
+  const nextMissingBtn = document.getElementById('nextMissingBtn');
+  const nextMissingLabel = document.getElementById('nextMissingLabel');
+
+  function safePathParts(path){
+    const parts = String(path || '').replace(/\\/g, '/').split('/').filter(Boolean);
+    if(!parts.length || parts.some(part => part === '.' || part === '..')) throw new Error('不安全的檔案路徑');
+    return parts;
+  }
+
+  async function pickDownloadFolder(){
+    if(!window.showDirectoryPicker){
+      checkStat.textContent = '這個瀏覽器不支援指定資料夾；將使用一般下載方式';
+      return;
+    }
+    try{
+      downloadFolderHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+      pickDownloadFolderBtn.textContent = '下載資料夾：' + downloadFolderHandle.name;
+      checkStat.textContent = '已選擇「' + downloadFolderHandle.name + '」，下載時會自動建立正確子資料夾';
+    }catch(err){
+      if(err && err.name !== 'AbortError') checkStat.textContent = '無法取得資料夾寫入權限：' + err.message;
+    }
+  }
+
+  async function writeBlobToFolder(path, blob){
+    if(!downloadFolderHandle) return false;
+    const parts = safePathParts(path);
+    let folder = downloadFolderHandle;
+    for(let i = 0; i < parts.length - 1; i++) folder = await folder.getDirectoryHandle(parts[i], { create: true });
+    const file = await folder.getFileHandle(parts[parts.length - 1], { create: true });
+    const writable = await file.createWritable();
+    await writable.write(blob);
+    await writable.close();
+    return true;
+  }
+
+  pickDownloadFolderBtn.addEventListener('click', pickDownloadFolder);
+
+  function normalizePath(p){
+    p = p.trim();
+    // strip protocol+domain if present, keep path only
+    p = p.replace(/^https?:\/\/[^\/]+\//i, '');
+    p = p.replace(/^\/+/, '');
+    p = p.replace(/\\\//g, '/');
+    return p;
+  }
+
+  function basename(p){
+    const parts = p.split('/');
+    return parts[parts.length - 1].toLowerCase();
+  }
+
+  function updateCompareEnabled(){
+    compareBtn.disabled = !(requiredAssets.size > 0 && localFiles.length > 0);
+  }
+
+  parseBtn.addEventListener('click', function(){
+    const raw = logInput.value;
+    if(!raw.trim()){
+      parseStat.textContent = '請先貼上側錄內容';
+      return;
+    }
+    const normalizedRaw = raw.replace(/\\\//g, '/');
+    const found = new Set();
+
+    let m;
+    pathRegex.lastIndex = 0;
+    while((m = pathRegex.exec(normalizedRaw)) !== null){
+      const val = normalizePath(m[0]);
+      if(MEDIA_EXT.test(val)) found.add(val);
+    }
+    keyRegex.lastIndex = 0;
+    while((m = keyRegex.exec(normalizedRaw)) !== null){
+      const val = normalizePath(m[1]);
+      if(MEDIA_EXT.test(val)) found.add(val);
+    }
+
+    found.forEach(v => requiredAssets.add(v));
+    parseStat.innerHTML = '已解析出 <b>' + requiredAssets.size + '</b> 筆不重複圖資路徑（本次貼入新增 <b>' + found.size + '</b> 筆，含重複比對）';
+    updateCompareEnabled();
+  });
+
+  clearLogBtn.addEventListener('click', function(){
+    logInput.value = '';
+    requiredAssets = new Set(KNOWN_HARDCODED_ASSETS);
+    parseStat.textContent = '已清空解析結果（內建的固定資源仍保留）';
+    updateCompareEnabled();
+  });
+
+  const uploadTxtBtn = document.getElementById('uploadTxtBtn');
+  const txtFileInput = document.getElementById('txtFileInput');
+
+  uploadTxtBtn.addEventListener('click', function(){
+    txtFileInput.click();
+  });
+
+  txtFileInput.addEventListener('change', function(e){
+    const file = e.target.files && e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = function(ev){
+      const content = ev.target.result;
+      logInput.value = logInput.value.trim()
+        ? logInput.value + '\n\n---\n\n' + content
+        : content;
+      parseStat.innerHTML = '已匯入檔案 <b>' + file.name + '</b>（' + (content.length/1024).toFixed(1) + ' KB），可以按「解析圖資清單」了';
+    };
+    reader.onerror = function(){
+      parseStat.textContent = '讀取檔案失敗，請重試';
+    };
+    reader.readAsText(file);
+    txtFileInput.value = '';
+  });
+
+  const manualPathInput = document.getElementById('manualPathInput');
+  const manualAddBtn = document.getElementById('manualAddBtn');
+  const manualAddStat = document.getElementById('manualAddStat');
+
+  function addManualPath(){
+    const raw = manualPathInput.value.trim();
+    if(!raw){
+      manualAddStat.textContent = '請先輸入路徑或網址';
+      return;
+    }
+    const normalized = normalizePath(raw);
+    if(!MEDIA_EXT.test(normalized)){
+      manualAddStat.textContent = '看起來不是圖片/音檔格式，請確認副檔名（png/jpg/gif/webp/svg/mp3/ogg/wav... 等）';
+      return;
+    }
+    const isNew = !requiredAssets.has(normalized);
+    requiredAssets.add(normalized);
+    manualAddStat.innerHTML = isNew
+      ? '已加入：<b>' + normalized + '</b>（目前清單共 ' + requiredAssets.size + ' 筆）'
+      : '這筆本來就在清單裡了：' + normalized;
+    manualPathInput.value = '';
+    updateCompareEnabled();
+  }
+
+  manualAddBtn.addEventListener('click', addManualPath);
+  manualPathInput.addEventListener('keydown', function(e){
+    if(e.key === 'Enter') addManualPath();
+  });
+
+  pickFolderBtn.addEventListener('click', function(){
+    folderInput.click();
+  });
+
+  folderInput.addEventListener('change', function(e){
+    const files = Array.from(e.target.files || []);
+    localFiles = files.map(f => {
+      const rel = (f.webkitRelativePath || f.name);
+      // drop the top-level folder name from the relative path for matching
+      const parts = rel.split('/');
+      const relNoRoot = parts.length > 1 ? parts.slice(1).join('/') : rel;
+      return { name: f.name.toLowerCase(), relPath: relNoRoot.toLowerCase() };
+    });
+    folderStat.innerHTML = '已讀取資料夾，共 <b>' + localFiles.length + '</b> 個檔案';
+    updateCompareEnabled();
+  });
+
+  clearFolderBtn.addEventListener('click', function(){
+    localFiles = [];
+    folderInput.value = '';
+    folderStat.textContent = '已清空';
+    updateCompareEnabled();
+  });
+
+  function isLocallyPresent(reqPath){
+    const bn = basename(reqPath);
+    const rp = reqPath.toLowerCase();
+    return localFiles.some(f => f.name === bn || f.relPath === rp || f.relPath.endsWith('/' + bn));
+  }
+
+  function calcPct(matched, total){
+    if (total <= 0) return 100;
+    if (matched >= total) return 100;
+    // 還沒真的補滿就不要顯示 100%，避免四捨五入造成誤導（例如 99.93% 被四捨五入成 100%）
+    return Math.min(99, Math.round((matched / total) * 100));
+  }
+
+  compareBtn.addEventListener('click', function(){
+    const base = baseUrlInput.value.trim().replace(/\/+$/, '');
+    const all = Array.from(requiredAssets).sort();
+    let matched = 0;
+    missingResults = [];
+
+    missingList.innerHTML = '';
+
+    all.forEach(reqPath => {
+      const present = isLocallyPresent(reqPath);
+      if(present){
+        matched++;
+      } else {
+        missingResults.push(reqPath);
+      }
+    });
+
+    const total = all.length;
+    const pct = calcPct(matched, total);
+    lastTotal = total;
+    lastMatched = matched;
+
+    meterWrap.style.display = 'block';
+    pctText.textContent = pct + '%';
+    meterFill.style.width = pct + '%';
+    meterFill.classList.toggle('has-missing', missingResults.length > 0);
+    adjMeterWrap.style.display = 'none';
+
+    compareStat.innerHTML = '需要的圖資共 <b>' + total + '</b> 筆，本機已有 <b>' + matched + '</b> 筆，缺漏 <b>' + missingResults.length + '</b> 筆';
+
+    resultsWrap.style.display = 'block';
+    if(missingResults.length === 0){
+      missingList.innerHTML = '<div class="empty">沒有缺漏，本機資料夾已涵蓋所有側錄到的圖資</div>';
+    } else {
+      missingResults.forEach((p, i) => {
+        const row = document.createElement('div');
+        row.className = 'list-row';
+        row.dataset.idx = i;
+        const url = base + '/' + p;
+        row.innerHTML = '<span class="badge miss" data-role="badge">缺</span><span class="path">' + p + '</span><a href="' + url + '" target="_blank" rel="noopener">開啟</a>';
+        missingList.appendChild(row);
+      });
+    }
+
+    copyMissingBtn.disabled = missingResults.length === 0;
+    downloadMissingBtn.disabled = missingResults.length === 0;
+    checkAliveBtn.disabled = missingResults.length === 0;
+    downloadAllBtn.disabled = missingResults.length === 0;
+    missingStatus = missingResults.map(() => null);
+    checkStat.textContent = '';
+    nextMissingIndex = 0;
+    updateNextMissingLabel();
+  });
+
+  // ---- 檢查缺漏項目是否仍存在（偵測官方是否已下架 / 404） ----
+  const AUDIO_EXT_RE = /\.(mp3|ogg|wav|m4a|aac|opus)$/i;
+
+  function probeImage(url, timeoutMs){
+    return new Promise(resolve => {
+      const img = new Image();
+      let done = false;
+      const timer = setTimeout(() => {
+        if(done) return;
+        done = true;
+        resolve('unknown'); // 逾時，狀態不明（可能是網路慢，不代表不存在）
+      }, timeoutMs);
+      img.onload = function(){
+        if(done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve('alive');
+      };
+      img.onerror = function(){
+        if(done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve('gone');
+      };
+      img.src = url;
+    });
+  }
+
+  function probeAudio(url, timeoutMs){
+    return new Promise(resolve => {
+      const audio = new Audio();
+      let done = false;
+      const timer = setTimeout(() => {
+        if(done) return;
+        done = true;
+        audio.src = ''; // 停止載入
+        resolve('unknown');
+      }, timeoutMs);
+      audio.oncanplay = audio.onloadeddata = function(){
+        if(done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve('alive');
+      };
+      audio.onerror = function(){
+        if(done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve('gone');
+      };
+      audio.preload = 'auto';
+      audio.src = url;
+    });
+  }
+
+  function probeAsset(url, timeoutMs){
+    return AUDIO_EXT_RE.test(url) ? probeAudio(url, timeoutMs) : probeImage(url, timeoutMs);
+  }
+
+  async function runAliveCheck(){
+    checkAliveBtn.disabled = true;
+    const base = baseUrlInput.value.trim().replace(/\/+$/, '');
+    const CONCURRENCY = 4;
+    let goneCount = 0, aliveCount = 0, unknownCount = 0;
+    let cursor = 0;
+
+    function setBadge(idx, status){
+      const row = missingList.querySelector('.list-row[data-idx="' + idx + '"]');
+      if(!row) return;
+      const badge = row.querySelector('[data-role="badge"]');
+      row.classList.remove('is-gone');
+      if(status === 'alive'){
+        badge.className = 'badge miss';
+        badge.textContent = '缺';
+      } else if(status === 'gone'){
+        badge.className = 'badge gone';
+        badge.textContent = '404';
+        row.classList.add('is-gone');
+      } else {
+        badge.className = 'badge checking';
+        badge.textContent = '?';
+      }
+    }
+
+    missingResults.forEach((p, i) => setBadge(i, 'checking'));
+    checkStat.textContent = '檢查中… 0 / ' + missingResults.length;
+
+    async function worker(){
+      while(cursor < missingResults.length){
+        const idx = cursor++;
+        const url = base + '/' + missingResults[idx];
+        const status = await probeAsset(url, 8000);
+        const resolved = status === 'checking' ? 'unknown' : status;
+        setBadge(idx, resolved);
+        missingStatus[idx] = resolved === 'alive' ? 'alive' : (resolved === 'gone' ? 'gone' : null);
+        if(status === 'gone') goneCount++;
+        else if(status === 'alive') aliveCount++;
+        else unknownCount++;
+        checkStat.innerHTML = '檢查中… <b>' + (goneCount+aliveCount+unknownCount) + '</b> / ' + missingResults.length +
+          '　已下架 <b>' + goneCount + '</b>　仍可下載 <b>' + aliveCount + '</b>' +
+          (unknownCount ? '　逾時未知 <b>' + unknownCount + '</b>' : '');
+        // 稍微間隔，避免對伺服器發出過密集的請求
+        await new Promise(r => setTimeout(r, 120));
+      }
+    }
+
+    await Promise.all(Array.from({length: Math.min(CONCURRENCY, missingResults.length)}, worker));
+
+    checkStat.innerHTML = '檢查完成：已下架(404) <b>' + goneCount + '</b> 筆　仍可下載 <b>' + aliveCount + '</b> 筆' +
+      (unknownCount ? '　逾時未知 <b>' + unknownCount + '</b> 筆（可再檢查一次）' : '');
+    checkAliveBtn.disabled = false;
+
+    if(goneCount > 0){
+      const adjTotal = lastTotal - goneCount;
+      const adjPct = calcPct(lastMatched, adjTotal);
+      adjMeterWrap.style.display = 'block';
+      adjPctText.textContent = adjPct + '%';
+      adjMeterFill.style.width = adjPct + '%';
+      adjMeterFill.classList.toggle('has-missing', adjPct < 100);
+    }
+  }
+
+  checkAliveBtn.addEventListener('click', runAliveCheck);
+
+  // ---- 一鍵下載全部缺漏檔案 ----
+  async function downloadAllMissing(){
+    const base = baseUrlInput.value.trim().replace(/\/+$/, '');
+    const targets = missingResults
+      .map((p, i) => ({ p, i }))
+      .filter(item => missingStatus[item.i] !== 'gone'); // 跳過已確認 404 的項目
+
+    if(targets.length === 0){
+      checkStat.textContent = '沒有可下載的項目（全部已確認 404，或請先執行比對）';
+      return;
+    }
+
+    downloadAllBtn.disabled = true;
+    let done = 0, ok = 0;
+    const manualFallback = [];
+    const usesSelectedFolder = Boolean(downloadFolderHandle);
+
+    for(const { p } of targets){
+      const url = base + '/' + p;
+      try{
+        const resp = await fetch(url, { mode: 'cors' });
+        if(!resp.ok) throw new Error('HTTP ' + resp.status);
+        const blob = await resp.blob();
+        if(usesSelectedFolder){
+          // 選過根資料夾時直接寫入，並依 p 建立子資料夾，不交給瀏覽器猜下載位置。
+          await writeBlobToFolder(p, blob);
+        }else{
+          const blobUrl = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = blobUrl;
+          a.download = p;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 500);
+        }
+        ok++;
+      }catch(err){
+        // 伺服器沒開放 CORS 或其他網路錯誤 → 收進手動清單，稍後讓使用者自己開新分頁另存
+        manualFallback.push(p);
+      }
+      done++;
+      checkStat.innerHTML = (usesSelectedFolder ? '寫入指定資料夾中… ' : '下載處理中… ') + '<b>' + done + '</b> / ' + targets.length + '（成功 ' + ok + '）';
+      await new Promise(r => setTimeout(r, 200));
+    }
+
+    if(manualFallback.length === 0){
+      checkStat.innerHTML = usesSelectedFolder
+        ? '完成！已依正確路徑寫入指定資料夾 <b>' + ok + '</b> 筆'
+        : '完成！自動下載 <b>' + ok + '</b> 筆，請確認瀏覽器的下載資料夾';
+    } else {
+      checkStat.innerHTML = (usesSelectedFolder ? '已寫入指定資料夾 ' : '自動下載 ') + '<b>' + ok + '</b> 筆成功，' +
+        '<b>' + manualFallback.length + '</b> 筆伺服器不允許自動抓取，需要手動另存（清單如下，點過的連結會變色、存好可以按右邊「已存」打勾）';
+      manualFallbackItems = manualFallback.map(p => ({ p, opened: false, done: false }));
+      renderManualFallbackList(base);
+    }
+    downloadAllBtn.disabled = false;
+  }
+
+  let manualFallbackItems = []; // { p, opened, done }
+  let manualBase = '';
+
+  function renderManualFallbackList(base){
+    manualBase = base;
+    let box = document.getElementById('manualFallbackBox');
+    let clearBtn = document.getElementById('manualClearBtn');
+    if(!box){
+      box = document.createElement('div');
+      box.id = 'manualFallbackBox';
+      box.className = 'list';
+      box.style.marginTop = '12px';
+      checkStat.insertAdjacentElement('afterend', box);
+    }
+    if(!clearBtn){
+      clearBtn = document.createElement('button');
+      clearBtn.id = 'manualClearBtn';
+      clearBtn.className = 'secondary';
+      clearBtn.textContent = '清除已標記完成的項目';
+      clearBtn.style.marginTop = '8px';
+      clearBtn.addEventListener('click', function(){
+        manualFallbackItems = manualFallbackItems.filter(it => !it.done);
+        renderManualFallbackList(manualBase);
+      });
+      box.insertAdjacentElement('afterend', clearBtn);
+    }
+
+    box.innerHTML = '';
+    if(manualFallbackItems.length === 0){
+      box.innerHTML = '<div class="empty">全部處理完了</div>';
+      clearBtn.style.display = 'none';
+      return;
+    }
+    clearBtn.style.display = 'inline-block';
+
+    manualFallbackItems.forEach((item, idx) => {
+      const row = document.createElement('div');
+      row.className = 'list-row' + (item.opened ? ' is-opened' : '') + (item.done ? ' is-done' : '');
+      const url = manualBase + '/' + item.p;
+      const badgeText = item.done ? '已存' : (item.opened ? '已開' : '手動');
+      row.innerHTML =
+        '<span class="badge checking">' + badgeText + '</span>' +
+        '<span class="path">' + item.p + '</span>' +
+        '<button class="done-btn" data-idx="' + idx + '">' + (item.done ? '✓ 已存' : '標記已存') + '</button>' +
+        '<a href="' + url + '" target="_blank" rel="noopener">開啟(右鍵另存)</a>';
+      box.appendChild(row);
+    });
+
+    box.querySelectorAll('a').forEach((a, i) => {
+      a.addEventListener('click', function(){
+        manualFallbackItems[i].opened = true;
+        renderManualFallbackList(manualBase);
+      });
+    });
+    box.querySelectorAll('.done-btn').forEach(btn => {
+      btn.addEventListener('click', function(){
+        const idx = Number(btn.dataset.idx);
+        manualFallbackItems[idx].done = !manualFallbackItems[idx].done;
+        renderManualFallbackList(manualBase);
+      });
+    });
+  }
+
+  downloadAllBtn.addEventListener('click', downloadAllMissing);
+
+  copyMissingBtn.addEventListener('click', function(){
+    const base = baseUrlInput.value.trim().replace(/\/+$/, '');
+    const text = missingResults.map(p => base + '/' + p).join('\n');
+    navigator.clipboard.writeText(text).then(() => {
+      copyMissingBtn.textContent = '已複製 ✓';
+      setTimeout(() => copyMissingBtn.textContent = '複製缺漏清單', 1400);
+    });
+  });
+
+  downloadMissingBtn.addEventListener('click', function(){
+    const base = baseUrlInput.value.trim().replace(/\/+$/, '');
+    const text = missingResults.map(p => base + '/' + p).join('\n');
+    const blob = new Blob([text], {type: 'text/plain'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'missing_assets.txt';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  let nextMissingIndex = 0;
+  function updateNextMissingLabel(){
+    if(missingResults.length === 0){
+      nextMissingLabel.textContent = '（無缺漏）';
+      nextMissingBtn.disabled = true;
+      return;
+    }
+    nextMissingBtn.disabled = false;
+    nextMissingLabel.textContent = (nextMissingIndex + 1) + ' / ' + missingResults.length + '　' + missingResults[nextMissingIndex];
+  }
+  nextMissingBtn.addEventListener('click', function(){
+    if(missingResults.length === 0) return;
+    const base = baseUrlInput.value.trim().replace(/\/+$/, '');
+    const url = base + '/' + missingResults[nextMissingIndex];
+    window.open(url, '_blank', 'noopener');
+    nextMissingIndex = (nextMissingIndex + 1) % missingResults.length;
+    updateNextMissingLabel();
+  });
+
+})();
+</script>
+</body>
+</html>
+
