@@ -248,8 +248,6 @@
         <button id="pickDownloadFolderBtn" class="secondary">使用 assets/passionfruit</button>
         <button id="downloadAllBtn" disabled>一鍵下載全部缺漏檔案</button>
         <button id="downloadBatchBtn" class="secondary" disabled>下載批次下載器 (.cmd)</button>
-        <button id="copyMissingBtn" class="secondary" disabled>複製缺漏清單</button>
-        <button id="downloadMissingBtn" class="secondary" disabled>下載缺漏清單 (.txt)</button>
       </div>
       <div class="stat" id="checkStat"></div>
       <p class="hint" style="margin:8px 0 0;">先按「選擇下載根資料夾」一次後，工具會依圖資相對路徑自動建立並寫入子資料夾，例如 <code>images/actor/gif/xxx.gif</code>、<code>audio/actor_prototype/xxx.mp3</code>，不會把全部檔案混在同一層。若圖資站不允許瀏覽器跨網域取得檔案，請按「下載批次下載器 (.cmd)」後直接雙擊執行：選一次根資料夾，它會自動下載全部項目並建立正確子資料夾，不需逐張另存。已確認 404 的項目會自動略過。</p>
@@ -321,8 +319,6 @@
   const downloadAllBtn = document.getElementById('downloadAllBtn');
   const downloadBatchBtn = document.getElementById('downloadBatchBtn');
   const pickDownloadFolderBtn = document.getElementById('pickDownloadFolderBtn');
-  const copyMissingBtn = document.getElementById('copyMissingBtn');
-  const downloadMissingBtn = document.getElementById('downloadMissingBtn');
   const compareStat = document.getElementById('compareStat');
   const meterWrap = document.getElementById('meterWrap');
   const meterFill = document.getElementById('meterFill');
@@ -608,8 +604,6 @@
     }
 
     // 先等自動檢查完成，避免把已確認 404 的項目納入下載器。
-    copyMissingBtn.disabled = true;
-    downloadMissingBtn.disabled = true;
     downloadAllBtn.disabled = true;
     downloadBatchBtn.disabled = true;
     missingStatus = missingResults.map(() => null);
@@ -619,8 +613,6 @@
 
     if(missingResults.length > 0){
       await runAliveCheck();
-      copyMissingBtn.disabled = false;
-      downloadMissingBtn.disabled = false;
       downloadAllBtn.disabled = false;
       downloadBatchBtn.disabled = false;
     }else{
@@ -942,26 +934,6 @@
   }
 
   downloadAllBtn.addEventListener('click', downloadAllMissing);
-
-  copyMissingBtn.addEventListener('click', function(){
-    const base = baseUrlInput.value.trim().replace(/\/+$/, '');
-    const text = missingResults.map(p => base + '/' + p).join('\n');
-    navigator.clipboard.writeText(text).then(() => {
-      copyMissingBtn.textContent = '已複製 ✓';
-      setTimeout(() => copyMissingBtn.textContent = '複製缺漏清單', 1400);
-    });
-  });
-
-  downloadMissingBtn.addEventListener('click', function(){
-    const base = baseUrlInput.value.trim().replace(/\/+$/, '');
-    const text = missingResults.map(p => base + '/' + p).join('\n');
-    const blob = new Blob([text], {type: 'text/plain'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'missing_assets.txt';
-    a.click();
-    URL.revokeObjectURL(a.href);
-  });
 
   let nextMissingIndex = 0;
   function updateNextMissingLabel(){
