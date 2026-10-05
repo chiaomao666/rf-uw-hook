@@ -245,6 +245,7 @@
       <p class="hint">先完成上面兩步再按比對。比對會自動檢查所有缺漏項目是否仍存在：圖片用載入測試、音檔用播放測試。仍可下載會標示「缺」；載不出來代表 404／官方已下架，會標示「404」並加上刪除線。</p>
       <div class="row">
         <button id="compareBtn" disabled>執行比對</button>
+        <button id="downloadAllBtn" disabled>一鍵下載全部缺漏檔案</button>
       </div>
       <div class="stat" id="checkStat"></div>
       <p class="hint" style="margin:8px 0 0;">缺漏清單會顯示在下方。按每筆的「開啟」後，在新分頁以右鍵「另存圖片／另存連結」存到對應路徑；也可用「開啟下一筆缺漏檔案」逐筆處理。已確認 404 的項目會自動加上刪除線。</p>
@@ -311,6 +312,7 @@
 
   const compareBtn = document.getElementById('compareBtn');
   const checkStat = document.getElementById('checkStat');
+  const downloadAllBtn = document.getElementById('downloadAllBtn');
   const compareStat = document.getElementById('compareStat');
   const meterWrap = document.getElementById('meterWrap');
   const meterFill = document.getElementById('meterFill');
@@ -535,11 +537,13 @@
 
     missingStatus = missingResults.map(() => null);
     checkStat.textContent = '';
+    downloadAllBtn.disabled = true;
     nextMissingIndex = 0;
     updateNextMissingLabel();
 
     if(missingResults.length > 0){
       await runAliveCheck();
+      downloadAllBtn.disabled = false;
     }else{
       checkStat.textContent = '沒有缺漏項目，不需檢查';
     }
@@ -663,6 +667,34 @@
       adjMeterFill.classList.toggle('has-missing', adjPct < 100);
     }
   }
+
+  // 直接交給瀏覽器下載；跨網域圖資是否能強制存檔仍由圖資站與瀏覽器設定決定。
+  async function downloadAllMissing(){
+    const base = baseUrlInput.value.trim().replace(/\/+$/, '');
+    const targets = missingResults.filter((path, index) => missingStatus[index] !== 'gone');
+    if(targets.length === 0){
+      checkStat.textContent = '沒有可下載的項目（全部已確認 404，或請先執行比對）';
+      return;
+    }
+
+    downloadAllBtn.disabled = true;
+    for(let index = 0; index < targets.length; index++){
+      const path = targets[index];
+      const link = document.createElement('a');
+      link.href = base + '/' + path;
+      link.download = path.split('/').pop();
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      checkStat.innerHTML = '正在交給瀏覽器下載… <b>' + (index + 1) + '</b> / ' + targets.length;
+      await new Promise(resolve => setTimeout(resolve, 350));
+    }
+    checkStat.innerHTML = '已送出 <b>' + targets.length + '</b> 筆下載要求。若瀏覽器開啟新分頁而非下載，請用該筆的「開啟」連結手動另存。';
+    downloadAllBtn.disabled = false;
+  }
+
+  downloadAllBtn.addEventListener('click', downloadAllMissing);
 
   let nextMissingIndex = 0;
   function updateNextMissingLabel(){
