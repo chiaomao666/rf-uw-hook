@@ -248,12 +248,12 @@
         <button id="checkAliveBtn" class="secondary" disabled>檢查缺漏項目是否仍存在</button>
         <button id="pickDownloadFolderBtn" class="secondary">選擇下載根資料夾</button>
         <button id="downloadAllBtn" disabled>一鍵下載全部缺漏檔案</button>
-        <button id="downloadBatchBtn" class="secondary" disabled>下載批次下載器 (.ps1)</button>
+        <button id="downloadBatchBtn" class="secondary" disabled>下載批次下載器 (.cmd)</button>
         <button id="copyMissingBtn" class="secondary" disabled>複製缺漏清單</button>
         <button id="downloadMissingBtn" class="secondary" disabled>下載缺漏清單 (.txt)</button>
       </div>
       <div class="stat" id="checkStat"></div>
-      <p class="hint" style="margin:8px 0 0;">先按「選擇下載根資料夾」一次後，工具會依圖資相對路徑自動建立並寫入子資料夾，例如 <code>images/actor/gif/xxx.gif</code>、<code>audio/actor_prototype/xxx.mp3</code>，不會把全部檔案混在同一層。若圖資站不允許瀏覽器跨網域取得檔案，請按「下載批次下載器 (.ps1)」：執行後選一次根資料夾，它會自動下載全部項目並建立正確子資料夾，不需逐張另存。已確認 404 的項目會自動略過。</p>
+      <p class="hint" style="margin:8px 0 0;">先按「選擇下載根資料夾」一次後，工具會依圖資相對路徑自動建立並寫入子資料夾，例如 <code>images/actor/gif/xxx.gif</code>、<code>audio/actor_prototype/xxx.mp3</code>，不會把全部檔案混在同一層。若圖資站不允許瀏覽器跨網域取得檔案，請按「下載批次下載器 (.cmd)」後直接雙擊執行：選一次根資料夾，它會自動下載全部項目並建立正確子資料夾，不需逐張另存。已確認 404 的項目會自動略過。</p>
       <p class="hint" style="margin:6px 0 0;">💡 如果你是直接用 <code>file://</code> 開這個頁面（網址列開頭是 file:///），瀏覽器會把來源視為 <code>null</code>，這種情況下自動下載幾乎一定會失敗。如果想試試看能不能讓自動下載成功，可以改用本機伺服器開啟這個工具，例如在資料夾內開終端機執行 <code>python -m http.server 8000</code>，再用瀏覽器開 <code>http://localhost:8000/asset_check.html</code>——如果圖資伺服器本身允許任意來源的 CORS（很多圖床/CDN 為了讓其他網站可以嵌入圖片會這樣設定），這樣就有機會讓大部分檔案自動下載成功，不用再手動一張一張另存。</p>
 
       <div class="meter-wrap" id="meterWrap" style="display:none;">
@@ -698,6 +698,16 @@
     return "'" + String(value).replace(/'/g, "''") + "'";
   }
 
+  function powershellEncodedCommand(script){
+    // PowerShell 的 -EncodedCommand 規格是 UTF-16LE Base64。用 .cmd 包裝後可以直接雙擊執行。
+    let binary = '';
+    for(let i = 0; i < script.length; i++){
+      const code = script.charCodeAt(i);
+      binary += String.fromCharCode(code & 0xff, code >>> 8);
+    }
+    return btoa(binary);
+  }
+
   function downloadBatchScript(){
     const base = baseUrlInput.value.trim().replace(/\/+$/, '');
     const targets = missingResults
@@ -738,13 +748,16 @@
       "if ($failed.Count) { $failed | Set-Content -Encoding utf8 (Join-Path $root 'download_failed.txt') }",
       "Read-Host '按 Enter 關閉'"
     ].join('\r\n');
-    const blob = new Blob([script], {type: 'text/plain;charset=utf-8'});
+    const batch = '@echo off\r\n' +
+      'powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand ' + powershellEncodedCommand(script) + '\r\n' +
+      'pause\r\n';
+    const blob = new Blob([batch], {type: 'text/plain;charset=utf-8'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'download_missing_assets.ps1';
+    a.download = 'download_missing_assets.cmd';
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 500);
-    checkStat.textContent = '已下載批次下載器：執行後選一次根資料夾，即會自動下載 ' + targets.length + ' 筆圖資';
+    checkStat.textContent = '已下載批次下載器：直接雙擊後選一次根資料夾，即會自動下載 ' + targets.length + ' 筆圖資';
   }
 
   downloadBatchBtn.addEventListener('click', downloadBatchScript);
