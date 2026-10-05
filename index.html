@@ -245,13 +245,12 @@
       <p class="hint">先完成上面兩步再按比對。比對會自動檢查所有缺漏項目是否仍存在：圖片用載入測試、音檔用播放測試。仍可下載會標示「缺」；載不出來代表 404／官方已下架，會標示「404」並加上刪除線。</p>
       <div class="row">
         <button id="compareBtn" disabled>執行比對</button>
-        <button id="pickDownloadFolderBtn" class="secondary">使用 assets/passionfruit</button>
         <button id="downloadAllBtn" disabled>一鍵下載全部缺漏檔案</button>
-        <button id="downloadBatchBtn" class="secondary" disabled>下載批次下載器 (.cmd)</button>
+        <button id="helperStatusBtn" class="secondary">檢查下載小幫手</button>
+        <button id="downloadBatchBtn" class="secondary">下載本機小幫手 (.zip)</button>
       </div>
       <div class="stat" id="checkStat"></div>
-      <p class="hint" style="margin:8px 0 0;">先按「選擇下載根資料夾」一次後，工具會依圖資相對路徑自動建立並寫入子資料夾，例如 <code>images/actor/gif/xxx.gif</code>、<code>audio/actor_prototype/xxx.mp3</code>，不會把全部檔案混在同一層。若圖資站不允許瀏覽器跨網域取得檔案，請按「下載批次下載器 (.cmd)」後直接雙擊執行：選一次根資料夾，它會自動下載全部項目並建立正確子資料夾，不需逐張另存。已確認 404 的項目會自動略過。</p>
-      <p class="hint" style="margin:6px 0 0;">💡 如果你是直接用 <code>file://</code> 開這個頁面（網址列開頭是 file:///），瀏覽器會把來源視為 <code>null</code>，這種情況下自動下載幾乎一定會失敗。如果想試試看能不能讓自動下載成功，可以改用本機伺服器開啟這個工具，例如在資料夾內開終端機執行 <code>python -m http.server 8000</code>，再用瀏覽器開 <code>http://localhost:8000/asset_check.html</code>——如果圖資伺服器本身允許任意來源的 CORS（很多圖床/CDN 為了讓其他網站可以嵌入圖片會這樣設定），這樣就有機會讓大部分檔案自動下載成功，不用再手動一張一張另存。</p>
+      <p class="hint" style="margin:8px 0 0;">第一次使用：下載並解壓縮「本機小幫手」，雙擊 <code>啟動下載小幫手.cmd</code>，選擇一次 <code>assets/passionfruit</code>。小幫手會記住位置；之後保持小幫手視窗開著，直接按「一鍵下載」即可依正確相對路徑自動寫入，不需逐張另存或再次選資料夾。已確認 404 的項目會自動略過。</p>
 
       <div class="meter-wrap" id="meterWrap" style="display:none;">
         <div class="meter-head">
@@ -300,8 +299,7 @@
   let missingResults = [];          // array of required path strings currently missing
   let missingStatus = [];           // parallel array: null | 'alive' | 'gone' (set by the availability checker)
   let lastTotal = 0, lastMatched = 0; // snapshot from the most recent compare run
-  let localFolderHandle = null;       // 第二步選取的專案根資料夾，可用來自動定位 assets/passionfruit
-  let downloadFolderHandle = null;    // 實際寫入目標（預設使用 assets/passionfruit）
+  let localFolderHandle = null;       // 第二步選取的專案根資料夾
 
   const logInput = document.getElementById('logInput');
   const parseBtn = document.getElementById('parseBtn');
@@ -318,7 +316,7 @@
   const checkStat = document.getElementById('checkStat');
   const downloadAllBtn = document.getElementById('downloadAllBtn');
   const downloadBatchBtn = document.getElementById('downloadBatchBtn');
-  const pickDownloadFolderBtn = document.getElementById('pickDownloadFolderBtn');
+  const helperStatusBtn = document.getElementById('helperStatusBtn');
   const compareStat = document.getElementById('compareStat');
   const meterWrap = document.getElementById('meterWrap');
   const meterFill = document.getElementById('meterFill');
@@ -331,61 +329,11 @@
   const nextMissingBtn = document.getElementById('nextMissingBtn');
   const nextMissingLabel = document.getElementById('nextMissingLabel');
 
-  function safePathParts(path){
-    const parts = String(path || '').replace(/\\/g, '/').split('/').filter(Boolean);
-    if(!parts.length || parts.some(part => part === '.' || part === '..')) throw new Error('不安全的檔案路徑');
-    return parts;
+  function escapeHtml(value){
+    const el = document.createElement('span');
+    el.textContent = String(value);
+    return el.innerHTML;
   }
-
-  async function useDefaultDownloadFolder(){
-    if(!localFolderHandle) return false;
-    try{
-      const assets = await localFolderHandle.getDirectoryHandle('assets');
-      const passionfruit = await assets.getDirectoryHandle('passionfruit');
-      let permission = await passionfruit.queryPermission({ mode: 'readwrite' });
-      if(permission === 'prompt') permission = await passionfruit.requestPermission({ mode: 'readwrite' });
-      if(permission !== 'granted') return false;
-      downloadFolderHandle = passionfruit;
-      pickDownloadFolderBtn.textContent = '下載資料夾：assets/passionfruit';
-      return true;
-    }catch(err){
-      return false;
-    }
-  }
-
-  async function pickDownloadFolder(){
-    if(await useDefaultDownloadFolder()){
-      checkStat.textContent = '已自動使用第二步資料夾中的 assets/passionfruit';
-      return true;
-    }
-    if(!window.showDirectoryPicker){
-      checkStat.textContent = '找不到 assets/passionfruit，且這個瀏覽器不支援手動指定下載資料夾';
-      return false;
-    }
-    try{
-      downloadFolderHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
-      pickDownloadFolderBtn.textContent = '下載資料夾：' + downloadFolderHandle.name;
-      checkStat.textContent = '找不到第二步資料夾中的 assets/passionfruit，已改用手動選擇的資料夾';
-      return true;
-    }catch(err){
-      if(err && err.name !== 'AbortError') checkStat.textContent = '無法取得資料夾寫入權限：' + err.message;
-      return false;
-    }
-  }
-
-  async function writeBlobToFolder(path, blob){
-    if(!downloadFolderHandle) return false;
-    const parts = safePathParts(path);
-    let folder = downloadFolderHandle;
-    for(let i = 0; i < parts.length - 1; i++) folder = await folder.getDirectoryHandle(parts[i], { create: true });
-    const file = await folder.getFileHandle(parts[parts.length - 1], { create: true });
-    const writable = await file.createWritable();
-    await writable.write(blob);
-    await writable.close();
-    return true;
-  }
-
-  pickDownloadFolderBtn.addEventListener('click', pickDownloadFolder);
 
   function normalizePath(p){
     p = p.trim();
@@ -511,9 +459,7 @@
     try{
       localFolderHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
       localFiles = await readFolderHandle(localFolderHandle, '');
-      folderStat.innerHTML = '已讀取 <b>' + localFolderHandle.name + '</b>，共 <b>' + localFiles.length + '</b> 個檔案；下載時會優先使用 <b>assets/passionfruit</b>';
-      downloadFolderHandle = null;
-      pickDownloadFolderBtn.textContent = '使用 assets/passionfruit';
+      folderStat.innerHTML = '已讀取 <b>' + localFolderHandle.name + '</b>，共 <b>' + localFiles.length + '</b> 個檔案';
       updateCompareEnabled();
     }catch(err){
       if(err && err.name !== 'AbortError') folderStat.textContent = '讀取資料夾失敗：' + err.message;
@@ -531,17 +477,13 @@
     });
     folderStat.innerHTML = '已讀取資料夾，共 <b>' + localFiles.length + '</b> 個檔案';
     localFolderHandle = null;
-    downloadFolderHandle = null;
-    pickDownloadFolderBtn.textContent = '使用 assets/passionfruit';
     updateCompareEnabled();
   });
 
   clearFolderBtn.addEventListener('click', function(){
     localFiles = [];
     localFolderHandle = null;
-    downloadFolderHandle = null;
     folderInput.value = '';
-    pickDownloadFolderBtn.textContent = '使用 assets/passionfruit';
     folderStat.textContent = '已清空';
     updateCompareEnabled();
   });
@@ -739,198 +681,70 @@
     }
   }
 
-  // ---- CORS 受限時的本機批次下載器 ----
-  // GitHub Pages 的前端無法讀取未開 CORS 的跨網域檔案；此腳本改由使用者電腦上的
-  // PowerShell 下載，因此不受瀏覽器同源政策限制，且只需選一次目標資料夾。
-  function powershellQuote(value){
-    return "'" + String(value).replace(/'/g, "''") + "'";
+  // ---- 本機下載小幫手 ----
+  // 小幫手在使用者電腦上抓取檔案，避開圖資站的 CORS 限制，並記住目標資料夾。
+  const helperUrl = 'http://127.0.0.1:17642';
+
+  async function getHelperStatus(){
+    const response = await fetch(helperUrl + '/status', { cache: 'no-store' });
+    if(!response.ok) throw new Error('HTTP ' + response.status);
+    return response.json();
   }
 
-  function powershellEncodedCommand(script){
-    // PowerShell 的 -EncodedCommand 規格是 UTF-16LE Base64。用 .cmd 包裝後可以直接雙擊執行。
-    let binary = '';
-    for(let i = 0; i < script.length; i++){
-      const code = script.charCodeAt(i);
-      binary += String.fromCharCode(code & 0xff, code >>> 8);
+  async function checkHelper(){
+    helperStatusBtn.disabled = true;
+    try{
+      const status = await getHelperStatus();
+      checkStat.innerHTML = status.ready
+        ? '下載小幫手已就緒，目標資料夾：<b>' + escapeHtml(status.rootName || '已設定') + '</b>'
+        : '下載小幫手尚未設定資料夾；請關閉後重新啟動它。';
+    }catch(err){
+      checkStat.textContent = '找不到下載小幫手。請先下載、解壓縮並雙擊「啟動下載小幫手.cmd」。';
+    }finally{
+      helperStatusBtn.disabled = false;
     }
-    return btoa(binary);
   }
 
-  function downloadBatchScript(){
-    const base = baseUrlInput.value.trim().replace(/\/+$/, '');
-    const targets = missingResults
-      .map((p, i) => ({ p, i }))
-      .filter(item => missingStatus[item.i] !== 'gone');
-    if(targets.length === 0){
-      checkStat.textContent = '沒有可下載的項目，請先執行比對';
-      return;
-    }
-
-    const items = targets.map(item =>
-      "    @{ Path = " + powershellQuote(item.p) + "; Url = " + powershellQuote(base + '/' + item.p) + " }"
-    ).join(',\r\n');
-    const script = [
-      '# 此檔案由「圖資缺漏檢查工具」產生。',
-      '# 選擇一次根資料夾後，會依原始相對路徑自動建立子資料夾並下載全部圖資。',
-      "Add-Type -AssemblyName System.Windows.Forms",
-      "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog",
-      "$dialog.Description = '選擇圖資下載根資料夾（例如 passionfruit）'",
-      "if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { exit }",
-      "$root = $dialog.SelectedPath",
-      "$items = @(\r\n" + items + "\r\n)",
-      "$ok = 0; $failed = @()",
-      "foreach ($item in $items) {",
-      "  $relative = $item.Path -replace '/', '\\\\'",
-      "  $destination = Join-Path $root $relative",
-      "  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null",
-      "  try {",
-      "    Invoke-WebRequest -Uri $item.Url -OutFile $destination -UseBasicParsing -ErrorAction Stop",
-      "    $ok++",
-      "    Write-Host ('[' + $ok + '/' + $items.Count + '] ' + $item.Path) -ForegroundColor Green",
-      "  } catch {",
-      "    $failed += $item.Path",
-      "    Write-Warning ('下載失敗：' + $item.Path + ' — ' + $_.Exception.Message)",
-      "  }",
-      "}",
-      "Write-Host ('完成：成功 ' + $ok + ' 筆，失敗 ' + $failed.Count + ' 筆') -ForegroundColor Cyan",
-      "if ($failed.Count) { $failed | Set-Content -Encoding utf8 (Join-Path $root 'download_failed.txt') }",
-      "Read-Host '按 Enter 關閉'"
-    ].join('\r\n');
-    const batch = '@echo off\r\n' +
-      'powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand ' + powershellEncodedCommand(script) + '\r\n' +
-      'pause\r\n';
-    const blob = new Blob([batch], {type: 'text/plain;charset=utf-8'});
+  function downloadHelperPackage(){
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'download_missing_assets.cmd';
+    a.href = './rf_uw_download_helper.zip';
+    a.download = 'rf_uw_download_helper.zip';
     a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 500);
-    checkStat.textContent = '已下載批次下載器：直接雙擊後選一次根資料夾，即會自動下載 ' + targets.length + ' 筆圖資';
+    checkStat.textContent = '已開始下載小幫手。解壓縮後雙擊「啟動下載小幫手.cmd」，並在第一次選擇 assets/passionfruit。';
   }
 
-  downloadBatchBtn.addEventListener('click', downloadBatchScript);
+  helperStatusBtn.addEventListener('click', checkHelper);
+  downloadBatchBtn.addEventListener('click', downloadHelperPackage);
 
-  // ---- 一鍵下載全部缺漏檔案 ----
   async function downloadAllMissing(){
     const base = baseUrlInput.value.trim().replace(/\/+$/, '');
     const targets = missingResults
       .map((p, i) => ({ p, i }))
-      .filter(item => missingStatus[item.i] !== 'gone'); // 跳過已確認 404 的項目
-
+      .filter(item => missingStatus[item.i] !== 'gone');
     if(targets.length === 0){
       checkStat.textContent = '沒有可下載的項目（全部已確認 404，或請先執行比對）';
       return;
     }
 
     downloadAllBtn.disabled = true;
-    let done = 0, ok = 0;
-    const manualFallback = [];
-    // 下載時一律先嘗試第二步選定專案內的 assets/passionfruit；找不到才讓使用者選擇。
-    const usesSelectedFolder = downloadFolderHandle ? true : await pickDownloadFolder();
-
-    for(const { p } of targets){
-      const url = base + '/' + p;
-      try{
-        const resp = await fetch(url, { mode: 'cors' });
-        if(!resp.ok) throw new Error('HTTP ' + resp.status);
-        const blob = await resp.blob();
-        if(usesSelectedFolder){
-          // 選過根資料夾時直接寫入，並依 p 建立子資料夾，不交給瀏覽器猜下載位置。
-          await writeBlobToFolder(p, blob);
-        }else{
-          const blobUrl = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = blobUrl;
-          a.download = p;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          setTimeout(() => URL.revokeObjectURL(blobUrl), 500);
-        }
-        ok++;
-      }catch(err){
-        // 伺服器沒開放 CORS 或其他網路錯誤 → 收進手動清單，稍後讓使用者自己開新分頁另存
-        manualFallback.push(p);
-      }
-      done++;
-      checkStat.innerHTML = (usesSelectedFolder ? '寫入指定資料夾中… ' : '下載處理中… ') + '<b>' + done + '</b> / ' + targets.length + '（成功 ' + ok + '）';
-      await new Promise(r => setTimeout(r, 200));
-    }
-
-    if(manualFallback.length === 0){
-      checkStat.innerHTML = usesSelectedFolder
-        ? '完成！已依正確路徑寫入指定資料夾 <b>' + ok + '</b> 筆'
-        : '完成！自動下載 <b>' + ok + '</b> 筆，請確認瀏覽器的下載資料夾';
-    } else {
-      checkStat.innerHTML = (usesSelectedFolder ? '已寫入指定資料夾 ' : '自動下載 ') + '<b>' + ok + '</b> 筆成功，' +
-        '<b>' + manualFallback.length + '</b> 筆伺服器不允許自動抓取，需要手動另存（清單如下，點過的連結會變色、存好可以按右邊「已存」打勾）';
-      manualFallbackItems = manualFallback.map(p => ({ p, opened: false, done: false }));
-      renderManualFallbackList(base);
-    }
-    downloadAllBtn.disabled = false;
-  }
-
-  let manualFallbackItems = []; // { p, opened, done }
-  let manualBase = '';
-
-  function renderManualFallbackList(base){
-    manualBase = base;
-    let box = document.getElementById('manualFallbackBox');
-    let clearBtn = document.getElementById('manualClearBtn');
-    if(!box){
-      box = document.createElement('div');
-      box.id = 'manualFallbackBox';
-      box.className = 'list';
-      box.style.marginTop = '12px';
-      checkStat.insertAdjacentElement('afterend', box);
-    }
-    if(!clearBtn){
-      clearBtn = document.createElement('button');
-      clearBtn.id = 'manualClearBtn';
-      clearBtn.className = 'secondary';
-      clearBtn.textContent = '清除已標記完成的項目';
-      clearBtn.style.marginTop = '8px';
-      clearBtn.addEventListener('click', function(){
-        manualFallbackItems = manualFallbackItems.filter(it => !it.done);
-        renderManualFallbackList(manualBase);
+    checkStat.textContent = '正在連線至本機下載小幫手…';
+    try{
+      const response = await fetch(helperUrl + '/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assets: targets.map(item => ({ path: item.p, url: base + '/' + item.p })) })
       });
-      box.insertAdjacentElement('afterend', clearBtn);
+      const result = await response.json();
+      if(!response.ok) throw new Error(result.error || ('HTTP ' + response.status));
+      const failed = Array.isArray(result.failed) ? result.failed.length : 0;
+      checkStat.innerHTML = failed
+        ? '下載完成：成功 <b>' + result.ok + '</b> 筆，失敗 <b>' + failed + '</b> 筆；失敗清單已寫入目標資料夾。'
+        : '完成！已依正確相對路徑寫入 <b>' + result.ok + '</b> 筆圖資。';
+    }catch(err){
+      checkStat.textContent = '無法使用下載小幫手：' + err.message + '。請確認它已啟動且視窗仍保持開啟。';
+    }finally{
+      downloadAllBtn.disabled = false;
     }
-
-    box.innerHTML = '';
-    if(manualFallbackItems.length === 0){
-      box.innerHTML = '<div class="empty">全部處理完了</div>';
-      clearBtn.style.display = 'none';
-      return;
-    }
-    clearBtn.style.display = 'inline-block';
-
-    manualFallbackItems.forEach((item, idx) => {
-      const row = document.createElement('div');
-      row.className = 'list-row' + (item.opened ? ' is-opened' : '') + (item.done ? ' is-done' : '');
-      const url = manualBase + '/' + item.p;
-      const badgeText = item.done ? '已存' : (item.opened ? '已開' : '手動');
-      row.innerHTML =
-        '<span class="badge checking">' + badgeText + '</span>' +
-        '<span class="path">' + item.p + '</span>' +
-        '<button class="done-btn" data-idx="' + idx + '">' + (item.done ? '✓ 已存' : '標記已存') + '</button>' +
-        '<a href="' + url + '" target="_blank" rel="noopener">開啟(右鍵另存)</a>';
-      box.appendChild(row);
-    });
-
-    box.querySelectorAll('a').forEach((a, i) => {
-      a.addEventListener('click', function(){
-        manualFallbackItems[i].opened = true;
-        renderManualFallbackList(manualBase);
-      });
-    });
-    box.querySelectorAll('.done-btn').forEach(btn => {
-      btn.addEventListener('click', function(){
-        const idx = Number(btn.dataset.idx);
-        manualFallbackItems[idx].done = !manualFallbackItems[idx].done;
-        renderManualFallbackList(manualBase);
-      });
-    });
   }
 
   downloadAllBtn.addEventListener('click', downloadAllMissing);
