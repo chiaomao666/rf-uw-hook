@@ -248,11 +248,12 @@
         <button id="checkAliveBtn" class="secondary" disabled>檢查缺漏項目是否仍存在</button>
         <button id="pickDownloadFolderBtn" class="secondary">選擇下載根資料夾</button>
         <button id="downloadAllBtn" disabled>一鍵下載全部缺漏檔案</button>
+        <button id="downloadBatchBtn" class="secondary" disabled>下載批次下載器 (.ps1)</button>
         <button id="copyMissingBtn" class="secondary" disabled>複製缺漏清單</button>
         <button id="downloadMissingBtn" class="secondary" disabled>下載缺漏清單 (.txt)</button>
       </div>
       <div class="stat" id="checkStat"></div>
-      <p class="hint" style="margin:8px 0 0;">先按「選擇下載根資料夾」一次後，工具會依圖資相對路徑自動建立並寫入子資料夾，例如 <code>images/actor/gif/xxx.gif</code>、<code>audio/actor_prototype/xxx.mp3</code>，不會把全部檔案混在同一層。此功能需要 Chrome／Edge 且用 <code>https://</code> 或 <code>http://localhost</code> 開啟。未選擇或瀏覽器不支援時，會退回一般瀏覽器下載。能不能自動抓取仍取決於圖資伺服器是否允許 CORS；不允許的項目會整理成手動另存清單。已確認 404 的項目會自動略過。</p>
+      <p class="hint" style="margin:8px 0 0;">先按「選擇下載根資料夾」一次後，工具會依圖資相對路徑自動建立並寫入子資料夾，例如 <code>images/actor/gif/xxx.gif</code>、<code>audio/actor_prototype/xxx.mp3</code>，不會把全部檔案混在同一層。若圖資站不允許瀏覽器跨網域取得檔案，請按「下載批次下載器 (.ps1)」：執行後選一次根資料夾，它會自動下載全部項目並建立正確子資料夾，不需逐張另存。已確認 404 的項目會自動略過。</p>
       <p class="hint" style="margin:6px 0 0;">💡 如果你是直接用 <code>file://</code> 開這個頁面（網址列開頭是 file:///），瀏覽器會把來源視為 <code>null</code>，這種情況下自動下載幾乎一定會失敗。如果想試試看能不能讓自動下載成功，可以改用本機伺服器開啟這個工具，例如在資料夾內開終端機執行 <code>python -m http.server 8000</code>，再用瀏覽器開 <code>http://localhost:8000/asset_check.html</code>——如果圖資伺服器本身允許任意來源的 CORS（很多圖床/CDN 為了讓其他網站可以嵌入圖片會這樣設定），這樣就有機會讓大部分檔案自動下載成功，不用再手動一張一張另存。</p>
 
       <div class="meter-wrap" id="meterWrap" style="display:none;">
@@ -319,6 +320,7 @@
   const checkAliveBtn = document.getElementById('checkAliveBtn');
   const checkStat = document.getElementById('checkStat');
   const downloadAllBtn = document.getElementById('downloadAllBtn');
+  const downloadBatchBtn = document.getElementById('downloadBatchBtn');
   const pickDownloadFolderBtn = document.getElementById('pickDownloadFolderBtn');
   const copyMissingBtn = document.getElementById('copyMissingBtn');
   const downloadMissingBtn = document.getElementById('downloadMissingBtn');
@@ -558,6 +560,7 @@
     downloadMissingBtn.disabled = missingResults.length === 0;
     checkAliveBtn.disabled = missingResults.length === 0;
     downloadAllBtn.disabled = missingResults.length === 0;
+    downloadBatchBtn.disabled = missingResults.length === 0;
     missingStatus = missingResults.map(() => null);
     checkStat.textContent = '';
     nextMissingIndex = 0;
@@ -687,6 +690,64 @@
   }
 
   checkAliveBtn.addEventListener('click', runAliveCheck);
+
+  // ---- CORS 受限時的本機批次下載器 ----
+  // GitHub Pages 的前端無法讀取未開 CORS 的跨網域檔案；此腳本改由使用者電腦上的
+  // PowerShell 下載，因此不受瀏覽器同源政策限制，且只需選一次目標資料夾。
+  function powershellQuote(value){
+    return "'" + String(value).replace(/'/g, "''") + "'";
+  }
+
+  function downloadBatchScript(){
+    const base = baseUrlInput.value.trim().replace(/\/+$/, '');
+    const targets = missingResults
+      .map((p, i) => ({ p, i }))
+      .filter(item => missingStatus[item.i] !== 'gone');
+    if(targets.length === 0){
+      checkStat.textContent = '沒有可下載的項目，請先執行比對';
+      return;
+    }
+
+    const items = targets.map(item =>
+      "    @{ Path = " + powershellQuote(item.p) + "; Url = " + powershellQuote(base + '/' + item.p) + " }"
+    ).join(',\r\n');
+    const script = [
+      '# 此檔案由「圖資缺漏檢查工具」產生。',
+      '# 選擇一次根資料夾後，會依原始相對路徑自動建立子資料夾並下載全部圖資。',
+      "Add-Type -AssemblyName System.Windows.Forms",
+      "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog",
+      "$dialog.Description = '選擇圖資下載根資料夾（例如 passionfruit）'",
+      "if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { exit }",
+      "$root = $dialog.SelectedPath",
+      "$items = @(\r\n" + items + "\r\n)",
+      "$ok = 0; $failed = @()",
+      "foreach ($item in $items) {",
+      "  $relative = $item.Path -replace '/', '\\\\'",
+      "  $destination = Join-Path $root $relative",
+      "  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null",
+      "  try {",
+      "    Invoke-WebRequest -Uri $item.Url -OutFile $destination -UseBasicParsing -ErrorAction Stop",
+      "    $ok++",
+      "    Write-Host ('[' + $ok + '/' + $items.Count + '] ' + $item.Path) -ForegroundColor Green",
+      "  } catch {",
+      "    $failed += $item.Path",
+      "    Write-Warning ('下載失敗：' + $item.Path + ' — ' + $_.Exception.Message)",
+      "  }",
+      "}",
+      "Write-Host ('完成：成功 ' + $ok + ' 筆，失敗 ' + $failed.Count + ' 筆') -ForegroundColor Cyan",
+      "if ($failed.Count) { $failed | Set-Content -Encoding utf8 (Join-Path $root 'download_failed.txt') }",
+      "Read-Host '按 Enter 關閉'"
+    ].join('\r\n');
+    const blob = new Blob([script], {type: 'text/plain;charset=utf-8'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'download_missing_assets.ps1';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 500);
+    checkStat.textContent = '已下載批次下載器：執行後選一次根資料夾，即會自動下載 ' + targets.length + ' 筆圖資';
+  }
+
+  downloadBatchBtn.addEventListener('click', downloadBatchScript);
 
   // ---- 一鍵下載全部缺漏檔案 ----
   async function downloadAllMissing(){
@@ -855,4 +916,3 @@
 </script>
 </body>
 </html>
-
