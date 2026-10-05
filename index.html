@@ -242,10 +242,9 @@
   <div class="panel" data-step="STEP 03 — 比對結果">
     <div class="panel-body">
       <h2>比對</h2>
-      <p class="hint">先完成上面兩步再按比對。比對邏輯：只要檔名（或完整相對路徑）在本機資料夾裡找得到，就視為「已快取」。比對完之後可以按「檢查缺漏項目是否仍存在」，工具會逐一嘗試載入每個缺漏項目的網址（圖片用載入測試，音檔用播放測試），載得出來代表仍可下載（標示「缺」），載不出來代表該資源已經 404/ 官方已下架（標示「404」，並會用刪除線標記）。</p>
+      <p class="hint">先完成上面兩步再按比對。比對會自動檢查所有缺漏項目是否仍存在：圖片用載入測試、音檔用播放測試。仍可下載會標示「缺」；載不出來代表 404／官方已下架，會標示「404」並加上刪除線。</p>
       <div class="row">
         <button id="compareBtn" disabled>執行比對</button>
-        <button id="checkAliveBtn" class="secondary" disabled>檢查缺漏項目是否仍存在</button>
         <button id="pickDownloadFolderBtn" class="secondary">選擇下載根資料夾</button>
         <button id="downloadAllBtn" disabled>一鍵下載全部缺漏檔案</button>
         <button id="downloadBatchBtn" class="secondary" disabled>下載批次下載器 (.cmd)</button>
@@ -317,7 +316,6 @@
   const folderStat = document.getElementById('folderStat');
 
   const compareBtn = document.getElementById('compareBtn');
-  const checkAliveBtn = document.getElementById('checkAliveBtn');
   const checkStat = document.getElementById('checkStat');
   const downloadAllBtn = document.getElementById('downloadAllBtn');
   const downloadBatchBtn = document.getElementById('downloadBatchBtn');
@@ -512,7 +510,7 @@
     return Math.min(99, Math.round((matched / total) * 100));
   }
 
-  compareBtn.addEventListener('click', function(){
+  compareBtn.addEventListener('click', async function(){
     const base = baseUrlInput.value.trim().replace(/\/+$/, '');
     const all = Array.from(requiredAssets).sort();
     let matched = 0;
@@ -556,15 +554,25 @@
       });
     }
 
-    copyMissingBtn.disabled = missingResults.length === 0;
-    downloadMissingBtn.disabled = missingResults.length === 0;
-    checkAliveBtn.disabled = missingResults.length === 0;
-    downloadAllBtn.disabled = missingResults.length === 0;
-    downloadBatchBtn.disabled = missingResults.length === 0;
+    // 先等自動檢查完成，避免把已確認 404 的項目納入下載器。
+    copyMissingBtn.disabled = true;
+    downloadMissingBtn.disabled = true;
+    downloadAllBtn.disabled = true;
+    downloadBatchBtn.disabled = true;
     missingStatus = missingResults.map(() => null);
     checkStat.textContent = '';
     nextMissingIndex = 0;
     updateNextMissingLabel();
+
+    if(missingResults.length > 0){
+      await runAliveCheck();
+      copyMissingBtn.disabled = false;
+      downloadMissingBtn.disabled = false;
+      downloadAllBtn.disabled = false;
+      downloadBatchBtn.disabled = false;
+    }else{
+      checkStat.textContent = '沒有缺漏項目，不需檢查';
+    }
   });
 
   // ---- 檢查缺漏項目是否仍存在（偵測官方是否已下架 / 404） ----
@@ -627,7 +635,6 @@
   }
 
   async function runAliveCheck(){
-    checkAliveBtn.disabled = true;
     const base = baseUrlInput.value.trim().replace(/\/+$/, '');
     const CONCURRENCY = 4;
     let goneCount = 0, aliveCount = 0, unknownCount = 0;
@@ -652,7 +659,7 @@
     }
 
     missingResults.forEach((p, i) => setBadge(i, 'checking'));
-    checkStat.textContent = '檢查中… 0 / ' + missingResults.length;
+    checkStat.textContent = '自動檢查中… 0 / ' + missingResults.length;
 
     async function worker(){
       while(cursor < missingResults.length){
@@ -665,7 +672,7 @@
         if(status === 'gone') goneCount++;
         else if(status === 'alive') aliveCount++;
         else unknownCount++;
-        checkStat.innerHTML = '檢查中… <b>' + (goneCount+aliveCount+unknownCount) + '</b> / ' + missingResults.length +
+        checkStat.innerHTML = '自動檢查中… <b>' + (goneCount+aliveCount+unknownCount) + '</b> / ' + missingResults.length +
           '　已下架 <b>' + goneCount + '</b>　仍可下載 <b>' + aliveCount + '</b>' +
           (unknownCount ? '　逾時未知 <b>' + unknownCount + '</b>' : '');
         // 稍微間隔，避免對伺服器發出過密集的請求
@@ -677,8 +684,6 @@
 
     checkStat.innerHTML = '檢查完成：已下架(404) <b>' + goneCount + '</b> 筆　仍可下載 <b>' + aliveCount + '</b> 筆' +
       (unknownCount ? '　逾時未知 <b>' + unknownCount + '</b> 筆（可再檢查一次）' : '');
-    checkAliveBtn.disabled = false;
-
     if(goneCount > 0){
       const adjTotal = lastTotal - goneCount;
       const adjPct = calcPct(lastMatched, adjTotal);
@@ -688,8 +693,6 @@
       adjMeterFill.classList.toggle('has-missing', adjPct < 100);
     }
   }
-
-  checkAliveBtn.addEventListener('click', runAliveCheck);
 
   // ---- CORS 受限時的本機批次下載器 ----
   // GitHub Pages 的前端無法讀取未開 CORS 的跨網域檔案；此腳本改由使用者電腦上的
