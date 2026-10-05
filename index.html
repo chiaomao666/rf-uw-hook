@@ -245,12 +245,9 @@
       <p class="hint">先完成上面兩步再按比對。比對會自動檢查所有缺漏項目是否仍存在：圖片用載入測試、音檔用播放測試。仍可下載會標示「缺」；載不出來代表 404／官方已下架，會標示「404」並加上刪除線。</p>
       <div class="row">
         <button id="compareBtn" disabled>執行比對</button>
-        <button id="downloadAllBtn" disabled>一鍵下載全部缺漏檔案</button>
-        <button id="helperStatusBtn" class="secondary">檢查下載器</button>
-        <button id="downloadBatchBtn" class="secondary">下載圖資下載器 (.exe)</button>
       </div>
       <div class="stat" id="checkStat"></div>
-      <p class="hint" style="margin:8px 0 0;">第一次使用：下載並執行「圖資下載器 (.exe)」，選擇一次 <code>assets/passionfruit</code>。下載器會記住位置；之後保持它開著，直接按「一鍵下載」即可依正確相對路徑自動寫入，不需逐張另存或再次選資料夾。已確認 404 的項目會自動略過。</p>
+      <p class="hint" style="margin:8px 0 0;">缺漏清單會顯示在下方。按每筆的「開啟」後，在新分頁以右鍵「另存圖片／另存連結」存到對應路徑；也可用「開啟下一筆缺漏檔案」逐筆處理。已確認 404 的項目會自動加上刪除線。</p>
 
       <div class="meter-wrap" id="meterWrap" style="display:none;">
         <div class="meter-head">
@@ -314,9 +311,6 @@
 
   const compareBtn = document.getElementById('compareBtn');
   const checkStat = document.getElementById('checkStat');
-  const downloadAllBtn = document.getElementById('downloadAllBtn');
-  const downloadBatchBtn = document.getElementById('downloadBatchBtn');
-  const helperStatusBtn = document.getElementById('helperStatusBtn');
   const compareStat = document.getElementById('compareStat');
   const meterWrap = document.getElementById('meterWrap');
   const meterFill = document.getElementById('meterFill');
@@ -328,12 +322,6 @@
   const missingList = document.getElementById('missingList');
   const nextMissingBtn = document.getElementById('nextMissingBtn');
   const nextMissingLabel = document.getElementById('nextMissingLabel');
-
-  function escapeHtml(value){
-    const el = document.createElement('span');
-    el.textContent = String(value);
-    return el.innerHTML;
-  }
 
   function normalizePath(p){
     p = p.trim();
@@ -545,9 +533,6 @@
       });
     }
 
-    // 先等自動檢查完成，避免把已確認 404 的項目納入下載器。
-    downloadAllBtn.disabled = true;
-    downloadBatchBtn.disabled = true;
     missingStatus = missingResults.map(() => null);
     checkStat.textContent = '';
     nextMissingIndex = 0;
@@ -555,8 +540,6 @@
 
     if(missingResults.length > 0){
       await runAliveCheck();
-      downloadAllBtn.disabled = false;
-      downloadBatchBtn.disabled = false;
     }else{
       checkStat.textContent = '沒有缺漏項目，不需檢查';
     }
@@ -680,74 +663,6 @@
       adjMeterFill.classList.toggle('has-missing', adjPct < 100);
     }
   }
-
-  // ---- 本機圖資下載器 ----
-  // 下載器在使用者電腦上抓取檔案，避開圖資站的 CORS 限制，並記住目標資料夾。
-  const helperUrl = 'http://127.0.0.1:17642';
-
-  async function getHelperStatus(){
-    const response = await fetch(helperUrl + '/status', { cache: 'no-store' });
-    if(!response.ok) throw new Error('HTTP ' + response.status);
-    return response.json();
-  }
-
-  async function checkHelper(){
-    helperStatusBtn.disabled = true;
-    try{
-      const status = await getHelperStatus();
-      checkStat.innerHTML = status.ready
-        ? '圖資下載器已就緒，目標資料夾：<b>' + escapeHtml(status.rootName || '已設定') + '</b>'
-        : '圖資下載器尚未設定資料夾；請關閉後重新啟動它。';
-    }catch(err){
-      checkStat.textContent = '找不到圖資下載器。請先下載並執行「RfUwDownloader.exe」。';
-    }finally{
-      helperStatusBtn.disabled = false;
-    }
-  }
-
-  function downloadHelperPackage(){
-    const a = document.createElement('a');
-    a.href = './RfUwDownloader.exe';
-    a.download = 'RfUwDownloader.exe';
-    a.click();
-    checkStat.textContent = '已開始下載圖資下載器。下載完成後雙擊「RfUwDownloader.exe」，並在第一次選擇 assets/passionfruit。';
-  }
-
-  helperStatusBtn.addEventListener('click', checkHelper);
-  downloadBatchBtn.addEventListener('click', downloadHelperPackage);
-
-  async function downloadAllMissing(){
-    const base = baseUrlInput.value.trim().replace(/\/+$/, '');
-    const targets = missingResults
-      .map((p, i) => ({ p, i }))
-      .filter(item => missingStatus[item.i] !== 'gone');
-    if(targets.length === 0){
-      checkStat.textContent = '沒有可下載的項目（全部已確認 404，或請先執行比對）';
-      return;
-    }
-
-    downloadAllBtn.disabled = true;
-    checkStat.textContent = '正在連線至本機圖資下載器…';
-    try{
-      const response = await fetch(helperUrl + '/download', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assets: targets.map(item => ({ path: item.p, url: base + '/' + item.p })) })
-      });
-      const result = await response.json();
-      if(!response.ok) throw new Error(result.error || ('HTTP ' + response.status));
-      const failed = Array.isArray(result.failed) ? result.failed.length : 0;
-      checkStat.innerHTML = failed
-        ? '下載完成：成功 <b>' + result.ok + '</b> 筆，失敗 <b>' + failed + '</b> 筆；失敗清單已寫入目標資料夾。'
-        : '完成！已依正確相對路徑寫入 <b>' + result.ok + '</b> 筆圖資。';
-    }catch(err){
-      checkStat.textContent = '無法使用圖資下載器：' + err.message + '。請確認 RfUwDownloader.exe 已啟動。';
-    }finally{
-      downloadAllBtn.disabled = false;
-    }
-  }
-
-  downloadAllBtn.addEventListener('click', downloadAllMissing);
 
   let nextMissingIndex = 0;
   function updateNextMissingLabel(){
