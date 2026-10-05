@@ -246,11 +246,11 @@
       <div class="row">
         <button id="compareBtn" disabled>執行比對</button>
         <button id="downloadAllBtn" disabled>一鍵下載全部缺漏檔案</button>
-        <button id="helperStatusBtn" class="secondary">檢查下載小幫手</button>
-        <button id="downloadBatchBtn" class="secondary">下載本機小幫手 (.zip)</button>
+        <button id="helperStatusBtn" class="secondary">檢查下載器</button>
+        <button id="downloadBatchBtn" class="secondary">下載圖資下載器 (.exe)</button>
       </div>
       <div class="stat" id="checkStat"></div>
-      <p class="hint" style="margin:8px 0 0;">第一次使用：下載並解壓縮「本機小幫手」，雙擊 <code>啟動下載小幫手.cmd</code>，選擇一次 <code>assets/passionfruit</code>。小幫手會記住位置；之後保持小幫手視窗開著，直接按「一鍵下載」即可依正確相對路徑自動寫入，不需逐張另存或再次選資料夾。已確認 404 的項目會自動略過。</p>
+      <p class="hint" style="margin:8px 0 0;">第一次使用：下載並執行「圖資下載器 (.exe)」，選擇一次 <code>assets/passionfruit</code>。下載器會記住位置；之後保持它開著，直接按「一鍵下載」即可依正確相對路徑自動寫入，不需逐張另存或再次選資料夾。已確認 404 的項目會自動略過。</p>
 
       <div class="meter-wrap" id="meterWrap" style="display:none;">
         <div class="meter-head">
@@ -681,8 +681,8 @@
     }
   }
 
-  // ---- 本機下載小幫手 ----
-  // 小幫手在使用者電腦上抓取檔案，避開圖資站的 CORS 限制，並記住目標資料夾。
+  // ---- 本機圖資下載器 ----
+  // 下載器在使用者電腦上抓取檔案，避開圖資站的 CORS 限制，並記住目標資料夾。
   const helperUrl = 'http://127.0.0.1:17642';
 
   async function getHelperStatus(){
@@ -696,10 +696,10 @@
     try{
       const status = await getHelperStatus();
       checkStat.innerHTML = status.ready
-        ? '下載小幫手已就緒，目標資料夾：<b>' + escapeHtml(status.rootName || '已設定') + '</b>'
-        : '下載小幫手尚未設定資料夾；請關閉後重新啟動它。';
+        ? '圖資下載器已就緒，目標資料夾：<b>' + escapeHtml(status.rootName || '已設定') + '</b>'
+        : '圖資下載器尚未設定資料夾；請關閉後重新啟動它。';
     }catch(err){
-      checkStat.textContent = '找不到下載小幫手。請先下載、解壓縮並雙擊「啟動下載小幫手.cmd」。';
+      checkStat.textContent = '找不到圖資下載器。請先下載並執行「RfUwDownloader.exe」。';
     }finally{
       helperStatusBtn.disabled = false;
     }
@@ -707,10 +707,10 @@
 
   function downloadHelperPackage(){
     const a = document.createElement('a');
-    a.href = './rf_uw_download_helper.zip';
-    a.download = 'rf_uw_download_helper.zip';
+    a.href = './RfUwDownloader.exe';
+    a.download = 'RfUwDownloader.exe';
     a.click();
-    checkStat.textContent = '已開始下載小幫手。解壓縮後雙擊「啟動下載小幫手.cmd」，並在第一次選擇 assets/passionfruit。';
+    checkStat.textContent = '已開始下載圖資下載器。下載完成後雙擊「RfUwDownloader.exe」，並在第一次選擇 assets/passionfruit。';
   }
 
   helperStatusBtn.addEventListener('click', checkHelper);
@@ -727,7 +727,7 @@
     }
 
     downloadAllBtn.disabled = true;
-    checkStat.textContent = '正在連線至本機下載小幫手…';
+    checkStat.textContent = '正在連線至本機圖資下載器…';
     try{
       const response = await fetch(helperUrl + '/download', {
         method: 'POST',
@@ -741,7 +741,7 @@
         ? '下載完成：成功 <b>' + result.ok + '</b> 筆，失敗 <b>' + failed + '</b> 筆；失敗清單已寫入目標資料夾。'
         : '完成！已依正確相對路徑寫入 <b>' + result.ok + '</b> 筆圖資。';
     }catch(err){
-      checkStat.textContent = '無法使用下載小幫手：' + err.message + '。請確認它已啟動且視窗仍保持開啟。';
+      checkStat.textContent = '無法使用圖資下載器：' + err.message + '。請確認 RfUwDownloader.exe 已啟動。';
     }finally{
       downloadAllBtn.disabled = false;
     }
