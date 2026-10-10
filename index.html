@@ -180,6 +180,8 @@
     border:1px solid var(--line);border-radius:2px;background:#11130d;
   }
   .asset-preview:hover{border-color:var(--teal);}
+  .list.show-all-previews .list-row{align-items:flex-start;}
+  .list.show-all-previews .asset-preview{width:180px;height:180px;}
 
   .empty{
     padding:20px;text-align:center;color:var(--muted);font-family:var(--mono);font-size:12px;
@@ -251,7 +253,7 @@
       <p class="hint">先完成上面兩步再按比對。比對會自動檢查所有缺漏項目是否仍存在：圖片用載入測試、音檔用播放測試。仍可下載會標示「缺」；載不出來代表 404／官方已下架，會標示「404」並加上刪除線。</p>
       <div class="row">
         <button id="compareBtn" disabled>執行比對</button>
-        <button id="downloadAllBtn" disabled>一鍵下載全部缺漏檔案</button>
+        <button id="downloadAllBtn" disabled>顯示所有缺漏圖片</button>
       </div>
       <div class="stat" id="checkStat"></div>
       <p class="hint" style="margin:8px 0 0;">缺漏圖片會直接顯示縮圖；在縮圖上按右鍵即可另存圖片。音檔則用每筆的「開啟」連結另存；也可用「開啟下一筆缺漏檔案」逐筆處理。已確認 404 的項目會自動加上刪除線。</p>
@@ -504,6 +506,7 @@
     missingResults = [];
 
     missingList.innerHTML = '';
+    missingList.classList.remove('show-all-previews');
 
     all.forEach(reqPath => {
       const present = isLocallyPresent(reqPath);
@@ -702,35 +705,21 @@
     }
   }
 
-  // 直接交給瀏覽器處理，並強制在新分頁開啟，避免離開檢查工具。
-  async function downloadAllMissing(){
-    const base = baseUrlInput.value.trim().replace(/\/+$/, '');
-    const targets = missingResults.filter((path, index) => missingStatus[index] !== 'gone');
-    if(targets.length === 0){
-      checkStat.textContent = '沒有可下載的項目（全部已確認 404，或請先執行比對）';
+  // 顯示原圖縮圖，讓使用者直接在同一頁右鍵另存，不開任何新分頁。
+  function showAllMissingImages(){
+    const imageCount = missingResults.filter((path, index) =>
+      missingStatus[index] !== 'gone' && !AUDIO_EXT_RE.test(path)
+    ).length;
+    if(imageCount === 0){
+      checkStat.textContent = '沒有可顯示的缺漏圖片（全部已確認 404，或缺漏項目都是音檔）。';
       return;
     }
-
-    downloadAllBtn.disabled = true;
-    for(let index = 0; index < targets.length; index++){
-      const path = targets[index];
-      const link = document.createElement('a');
-      link.href = base + '/' + path;
-      link.download = path.split('/').pop();
-      link.target = '_blank';
-      link.rel = 'noopener';
-      link.style.display = 'none';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      checkStat.innerHTML = '正在交給瀏覽器下載… <b>' + (index + 1) + '</b> / ' + targets.length;
-      await new Promise(resolve => setTimeout(resolve, 350));
-    }
-    checkStat.innerHTML = '已在新分頁送出 <b>' + targets.length + '</b> 筆下載要求。若顯示圖片而非下載，請在該新分頁右鍵另存。';
-    downloadAllBtn.disabled = false;
+    missingList.classList.add('show-all-previews');
+    resultsWrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    checkStat.innerHTML = '已顯示 <b>' + imageCount + '</b> 張缺漏圖片；直接在圖片上按右鍵即可另存。';
   }
 
-  downloadAllBtn.addEventListener('click', downloadAllMissing);
+  downloadAllBtn.addEventListener('click', showAllMissingImages);
 
   let nextMissingIndex = 0;
   function updateNextMissingLabel(){
