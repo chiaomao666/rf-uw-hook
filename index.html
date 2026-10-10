@@ -668,7 +668,7 @@
     }
   }
 
-  // 直接交給瀏覽器下載；跨網域圖資是否能強制存檔仍由圖資站與瀏覽器設定決定。
+  // 直接交給瀏覽器處理，並強制在新分頁開啟，避免離開檢查工具。
   async function downloadAllMissing(){
     const base = baseUrlInput.value.trim().replace(/\/+$/, '');
     const targets = missingResults.filter((path, index) => missingStatus[index] !== 'gone');
@@ -683,6 +683,8 @@
       const link = document.createElement('a');
       link.href = base + '/' + path;
       link.download = path.split('/').pop();
+      link.target = '_blank';
+      link.rel = 'noopener';
       link.style.display = 'none';
       document.body.appendChild(link);
       link.click();
@@ -690,7 +692,7 @@
       checkStat.innerHTML = '正在交給瀏覽器下載… <b>' + (index + 1) + '</b> / ' + targets.length;
       await new Promise(resolve => setTimeout(resolve, 350));
     }
-    checkStat.innerHTML = '已送出 <b>' + targets.length + '</b> 筆下載要求。若瀏覽器開啟新分頁而非下載，請用該筆的「開啟」連結手動另存。';
+    checkStat.innerHTML = '已在新分頁送出 <b>' + targets.length + '</b> 筆下載要求。若顯示圖片而非下載，請在該新分頁右鍵另存。';
     downloadAllBtn.disabled = false;
   }
 
