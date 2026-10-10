@@ -174,12 +174,6 @@
   .list-row .path{color:var(--paper);word-break:break-all;flex:1;}
   .list-row a{color:var(--teal);text-decoration:none;flex-shrink:0;}
   .list-row a:hover{color:var(--amber);text-decoration:underline;}
-  .asset-preview-link{display:block;flex-shrink:0;line-height:0;}
-  .asset-preview{
-    width:64px;height:64px;object-fit:contain;display:block;
-    border:1px solid var(--line);border-radius:2px;background:#11130d;
-  }
-  .asset-preview:hover{border-color:var(--teal);}
   .download-box{
     margin-top:18px;padding:14px;border:1px solid var(--amber-dim);
     border-radius:3px;background:#11130d;
@@ -585,21 +579,6 @@
         path.className = 'path';
         path.textContent = p;
         row.append(badge, path);
-        if(!AUDIO_EXT_RE.test(p)){
-          const previewLink = document.createElement('a');
-          previewLink.className = 'asset-preview-link';
-          previewLink.href = url;
-          previewLink.target = '_blank';
-          previewLink.rel = 'noopener';
-          previewLink.title = '可直接在圖片上按右鍵另存';
-          const preview = document.createElement('img');
-          preview.className = 'asset-preview';
-          preview.src = url;
-          preview.alt = p;
-          preview.loading = 'lazy';
-          previewLink.appendChild(preview);
-          row.appendChild(previewLink);
-        }
         const openLink = document.createElement('a');
         openLink.href = url;
         openLink.target = '_blank';
