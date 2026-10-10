@@ -99,13 +99,19 @@
   button.secondary:hover{background:var(--teal);border-color:var(--teal);color:#0e130f;}
   button.danger-btn:hover{background:var(--danger);border-color:var(--danger);color:#160c0a;}
 
-  input[type="text"]{
+  input[type="text"],input[type="number"]{
     background:#0e0f0b;color:var(--paper);
     border:1px solid var(--line);border-radius:2px;
     font-family:var(--mono);font-size:12.5px;
     padding:8px 10px;min-width:280px;
   }
-  input[type="text"]:focus{outline:1px solid var(--amber);}
+  input[type="text"]:focus,input[type="number"]:focus{outline:1px solid var(--amber);}
+  input[type="number"]{min-width:92px;width:92px;}
+  .generator{
+    margin-top:18px;padding-top:16px;border-top:1px solid var(--line);
+  }
+  .generator-title{font-family:var(--mono);font-size:12px;color:var(--paper);}
+  .generator label{font-family:var(--mono);font-size:11px;color:var(--muted);display:flex;align-items:center;gap:7px;}
 
   .stat{
     font-family:var(--mono);font-size:12px;color:var(--muted);
@@ -259,6 +265,16 @@
         <button id="clearFolderBtn" class="secondary">清空</button>
       </div>
       <div class="stat" id="folderStat"></div>
+      <div class="generator">
+        <div class="generator-title">依現有角色 ID 產生下一批候選圖資</div>
+        <p class="hint">只讀取既有角色的英文前綴與最大編號，例如 FROR06 → FROR07；每個新編號會一併加入一般版、A、B、C 造型。不存在的候選項目會在比對時標為 404。</p>
+        <div class="row">
+          <label>每個前綴往後產生 <input type="number" id="generatorCount" value="1" min="1" max="20" /> 組編號</label>
+          <input type="text" id="generatorPrefixes" placeholder="限定前綴（留空＝全部，例如 FROR, FRSE）" style="flex:1; min-width:260px;" />
+          <button id="generateIdsBtn" class="secondary" disabled>產生角色圖資候選</button>
+        </div>
+        <div class="stat" id="generatorStat">請先選擇資料夾，工具會從現有角色 ID 找出可用前綴。</div>
+      </div>
     </div>
   </div>
 
@@ -343,6 +359,10 @@
   const folderInput = document.getElementById('folderInput');
   const clearFolderBtn = document.getElementById('clearFolderBtn');
   const folderStat = document.getElementById('folderStat');
+  const generatorCount = document.getElementById('generatorCount');
+  const generatorPrefixes = document.getElementById('generatorPrefixes');
+  const generateIdsBtn = document.getElementById('generateIdsBtn');
+  const generatorStat = document.getElementById('generatorStat');
 
   const compareBtn = document.getElementById('compareBtn');
   const checkStat = document.getElementById('checkStat');
@@ -380,6 +400,98 @@
   function updateCompareEnabled(){
     compareBtn.disabled = !(requiredAssets.size > 0 && localFiles.length > 0);
   }
+
+  function getKnownCharacterPrefixes(){
+    // 只以已存在的角色主視覺檔案當成 ID 依據，避免把戰鬥動作尾碼 R 誤當角色前綴。
+    const patterns = [
+      /(?:^|\/)images\/actor\/gif\/tachie([a-z]+)(\d+)([abc]?)\.gif$/i,
+      /(?:^|\/)images\/actor\/head\/avatar([a-z]+)(\d+)([abc]?)\.png$/i,
+      /(?:^|\/)images\/actor\/half_full\/([a-z]+)(\d+)([abc]?)\.png$/i
+    ];
+    const groups = new Map();
+    localFiles.forEach(file => {
+      for(const pattern of patterns){
+        const match = file.relPath.match(pattern);
+        if(!match) continue;
+        const prefix = match[1].toUpperCase();
+        const number = Number(match[2]);
+        const width = match[2].length;
+        const previous = groups.get(prefix);
+        if(!previous || number > previous.max || (number === previous.max && width > previous.width)){
+          groups.set(prefix, { max: number, width: width });
+        }
+        break;
+      }
+    });
+    return groups;
+  }
+
+  function refreshGeneratorState(){
+    const groups = getKnownCharacterPrefixes();
+    generateIdsBtn.disabled = groups.size === 0;
+    if(!groups.size){
+      generatorStat.textContent = localFiles.length
+        ? '這個資料夾尚未找到角色主視覺 ID（tachie、avatar 或 half_full）。'
+        : '請先選擇資料夾，工具會從現有角色 ID 找出可用前綴。';
+      return;
+    }
+    const examples = Array.from(groups.entries()).slice(0, 6)
+      .map(([prefix, info]) => prefix + String(info.max).padStart(info.width, '0')).join('、');
+    generatorStat.innerHTML = '找到 <b>' + groups.size + '</b> 個角色前綴；目前最大編號例如：' + examples + (groups.size > 6 ? '…' : '');
+  }
+
+  function buildCharacterAssetPaths(id){
+    const battleId = id + 'R';
+    return [
+      'video/recruit/' + id + '.mp4',
+      'audio/battle/' + battleId + 'b1.mp3',
+      'audio/battle/' + battleId + 'b2.mp3',
+      'images/actor/gif/tachie' + id + '.gif',
+      'images/actor/half/bust' + id + '.png',
+      'images/actor/half_full/' + id + '.png',
+      'images/actor/head/avatar' + id + '.png',
+      'images/actor/head/smallavatar' + id + '.png',
+      'images/actor/piece/esoterica' + id + '.png',
+      'images/active_skill/SK' + id + '_1.png',
+      'images/site/street/svspc_' + id + '.png',
+      'images/actor/battle/' + battleId + '/' + battleId + 'a1.png',
+      'images/actor/battle/' + battleId + '/' + battleId + 'a2.png',
+      'images/actor/battle/' + battleId + '/' + battleId + 'b1.png',
+      'images/actor/battle/' + battleId + '/' + battleId + 'b2.png',
+      'images/actor/battle/' + battleId + '/' + battleId + 'c2.png',
+      'images/actor/battle/' + battleId + '/' + battleId + 'c3.png',
+      'images/actor/battle/' + battleId + '/' + battleId + 'c7.png',
+      'images/actor/battle/' + battleId + '/' + battleId + 'c8.png'
+    ];
+  }
+
+  generateIdsBtn.addEventListener('click', function(){
+    const groups = getKnownCharacterPrefixes();
+    const count = Math.max(1, Math.min(20, Number.parseInt(generatorCount.value, 10) || 1));
+    generatorCount.value = count;
+    const requestedPrefixes = new Set(generatorPrefixes.value.toUpperCase().split(/[\s,，]+/).filter(Boolean));
+    const selectedGroups = Array.from(groups.entries()).filter(([prefix]) => !requestedPrefixes.size || requestedPrefixes.has(prefix));
+    if(!selectedGroups.length){
+      generatorStat.textContent = '找不到符合指定前綴的現有角色 ID，請確認輸入內容。';
+      return;
+    }
+    const ids = [];
+    selectedGroups.forEach(([prefix, info]) => {
+      for(let offset = 1; offset <= count; offset++){
+        const number = String(info.max + offset).padStart(info.width, '0');
+        ['', 'A', 'B', 'C'].forEach(variant => ids.push(prefix + number + variant));
+      }
+    });
+    let added = 0;
+    ids.forEach(id => buildCharacterAssetPaths(id).forEach(path => {
+      if(!requiredAssets.has(path)){
+        requiredAssets.add(path);
+        added++;
+      }
+    }));
+    generatorStat.innerHTML = '已依 <b>' + selectedGroups.length + '</b> 個既有前綴產生 <b>' + ids.length + '</b> 個角色 ID，新增 <b>' + added + '</b> 筆候選圖資。按「執行比對」即可確認實際存在項目。';
+    updateCompareEnabled();
+  });
 
   parseBtn.addEventListener('click', function(){
     const raw = logInput.value;
@@ -488,6 +600,7 @@
       localFolderHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
       localFiles = await readFolderHandle(localFolderHandle, '');
       folderStat.innerHTML = '已讀取 <b>' + localFolderHandle.name + '</b>，共 <b>' + localFiles.length + '</b> 個檔案';
+      refreshGeneratorState();
       updateCompareEnabled();
     }catch(err){
       if(err && err.name !== 'AbortError') folderStat.textContent = '讀取資料夾失敗：' + err.message;
@@ -505,6 +618,7 @@
     });
     folderStat.innerHTML = '已讀取資料夾，共 <b>' + localFiles.length + '</b> 個檔案';
     localFolderHandle = null;
+    refreshGeneratorState();
     updateCompareEnabled();
   });
 
@@ -513,6 +627,7 @@
     localFolderHandle = null;
     folderInput.value = '';
     folderStat.textContent = '已清空';
+    refreshGeneratorState();
     updateCompareEnabled();
   });
 
