@@ -180,8 +180,29 @@
     border:1px solid var(--line);border-radius:2px;background:#11130d;
   }
   .asset-preview:hover{border-color:var(--teal);}
-  .list.show-all-previews .list-row{align-items:flex-start;}
-  .list.show-all-previews .asset-preview{width:180px;height:180px;}
+  .download-box{
+    margin-top:18px;padding:14px;border:1px solid var(--amber-dim);
+    border-radius:3px;background:#11130d;
+  }
+  .download-box-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+  .download-box-head h3{margin:0;color:var(--amber);font-size:14px;letter-spacing:.05em;}
+  .download-box-stat{font-family:var(--mono);font-size:11px;color:var(--muted);flex:1;}
+  .download-grid{
+    display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));gap:10px;
+    margin-top:12px;max-height:650px;overflow:auto;padding-right:2px;
+  }
+  .download-card{border:1px solid var(--line);background:#0e0f0b;padding:8px;min-width:0;}
+  .download-card.is-done{opacity:.45;}
+  .download-card img{
+    width:100%;height:142px;object-fit:contain;display:block;background:#151811;
+    border:1px solid #1b1e14;cursor:context-menu;
+  }
+  .download-card-path{
+    display:block;margin:7px 0;min-height:30px;font-family:var(--mono);font-size:10px;
+    line-height:1.35;color:var(--paper);word-break:break-all;
+  }
+  .download-card button{width:100%;font-size:10px;padding:5px 4px;}
+  @media (max-width:560px){.download-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.download-card img{height:120px;}}
 
   .empty{
     padding:20px;text-align:center;color:var(--muted);font-family:var(--mono);font-size:12px;
@@ -283,6 +304,16 @@
         </div>
         <div class="list" id="missingList"></div>
       </div>
+
+      <div class="download-box" id="downloadBox" style="display:none;">
+        <div class="download-box-head">
+          <h3>缺漏圖片下載區</h3>
+          <span class="download-box-stat" id="downloadBoxStat"></span>
+          <button class="secondary" id="clearDownloadedBtn">清除已標記項目</button>
+        </div>
+        <p class="hint" style="margin:9px 0 0;">直接在圖片上按右鍵「另存圖片」。存完後按下方的「標記已下載」，方便核對進度。</p>
+        <div class="download-grid" id="downloadGrid"></div>
+      </div>
     </div>
   </div>
 
@@ -304,6 +335,7 @@
   let localFiles = [];              // {name, relPath} both lowercased for matching
   let missingResults = [];          // array of required path strings currently missing
   let missingStatus = [];           // parallel array: null | 'alive' | 'gone' (set by the availability checker)
+  let downloadItems = [];           // { path, done }，僅供手動下載進度標記
   let lastTotal = 0, lastMatched = 0; // snapshot from the most recent compare run
   let localFolderHandle = null;       // 第二步選取的專案根資料夾
 
@@ -330,6 +362,10 @@
   const adjPctText = document.getElementById('adjPctText');
   const resultsWrap = document.getElementById('resultsWrap');
   const missingList = document.getElementById('missingList');
+  const downloadBox = document.getElementById('downloadBox');
+  const downloadBoxStat = document.getElementById('downloadBoxStat');
+  const downloadGrid = document.getElementById('downloadGrid');
+  const clearDownloadedBtn = document.getElementById('clearDownloadedBtn');
   const nextMissingBtn = document.getElementById('nextMissingBtn');
   const nextMissingLabel = document.getElementById('nextMissingLabel');
 
@@ -506,7 +542,9 @@
     missingResults = [];
 
     missingList.innerHTML = '';
-    missingList.classList.remove('show-all-previews');
+    downloadItems = [];
+    downloadBox.style.display = 'none';
+    downloadGrid.innerHTML = '';
 
     all.forEach(reqPath => {
       const present = isLocallyPresent(reqPath);
@@ -705,19 +743,56 @@
     }
   }
 
-  // 顯示原圖縮圖，讓使用者直接在同一頁右鍵另存，不開任何新分頁。
+  // 專用手動下載區：只顯示圖片，使用者可直接右鍵另存並自行標記完成。
+  function renderDownloadBox(){
+    downloadGrid.innerHTML = '';
+    const completedCount = downloadItems.filter(item => item.done).length;
+    downloadBoxStat.textContent = '圖片 ' + downloadItems.length + ' 張　已標記 ' + completedCount + ' 張';
+    clearDownloadedBtn.style.display = completedCount ? 'inline-block' : 'none';
+
+    downloadItems.forEach((item, index) => {
+      const card = document.createElement('div');
+      card.className = 'download-card' + (item.done ? ' is-done' : '');
+      const image = document.createElement('img');
+      image.src = baseUrlInput.value.trim().replace(/\/+$/, '') + '/' + item.path;
+      image.alt = item.path;
+      image.loading = 'lazy';
+      image.title = '在圖片上按右鍵即可另存';
+      const path = document.createElement('span');
+      path.className = 'download-card-path';
+      path.textContent = item.path;
+      const doneButton = document.createElement('button');
+      doneButton.className = 'secondary';
+      doneButton.textContent = item.done ? '✓ 已下載' : '標記已下載';
+      doneButton.addEventListener('click', function(){
+        downloadItems[index].done = !downloadItems[index].done;
+        renderDownloadBox();
+      });
+      card.append(image, path, doneButton);
+      downloadGrid.appendChild(card);
+    });
+  }
+
   function showAllMissingImages(){
-    const imageCount = missingResults.filter((path, index) =>
+    const images = missingResults.filter((path, index) =>
       missingStatus[index] !== 'gone' && !AUDIO_EXT_RE.test(path)
-    ).length;
-    if(imageCount === 0){
+    );
+    if(images.length === 0){
       checkStat.textContent = '沒有可顯示的缺漏圖片（全部已確認 404，或缺漏項目都是音檔）。';
       return;
     }
-    missingList.classList.add('show-all-previews');
-    resultsWrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    checkStat.innerHTML = '已顯示 <b>' + imageCount + '</b> 張缺漏圖片；直接在圖片上按右鍵即可另存。';
+    const retained = new Map(downloadItems.map(item => [item.path, item.done]));
+    downloadItems = images.map(path => ({ path: path, done: retained.get(path) || false }));
+    downloadBox.style.display = 'block';
+    renderDownloadBox();
+    downloadBox.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    checkStat.innerHTML = '已建立圖片下載區，共 <b>' + images.length + '</b> 張；直接右鍵另存後可逐張標記。';
   }
+
+  clearDownloadedBtn.addEventListener('click', function(){
+    downloadItems = downloadItems.filter(item => !item.done);
+    renderDownloadBox();
+  });
 
   downloadAllBtn.addEventListener('click', showAllMissingImages);
 
