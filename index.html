@@ -316,7 +316,7 @@
 
 <script>
 (function(){
-  const MEDIA_EXT = /(png|jpe?g|gif|webp|svg|avif|bmp|mp3|ogg|wav|m4a|aac|opus|uw)/i;
+  const MEDIA_EXT = /(png|jpe?g|gif|webp|svg|avif|bmp|mp3|ogg|wav|m4a|aac|opus|mp4|webm|mov|m3u8|uw)/i;
   // token like path/to/file.ext , allow letters/numbers/_/-/./  (unicode-safe for filenames)
   const pathRegex = /[A-Za-z0-9_\-\.\/]+\.(?:png|jpe?g|gif|webp|svg|avif|bmp|mp3|ogg|wav|m4a|aac|opus|uw)/gi;
   const keyRegex = /"(?:image|icon|avatar|portrait|asset|pic(?:ture)?|photo|thumbnail|banner|logo|sprite|texture|audio|music|sound|voice|bgm|se)[A-Za-z0-9_]*"\s*:\s*"([^"]+)"/gi;
@@ -605,6 +605,8 @@
 
   // ---- 檢查缺漏項目是否仍存在（偵測官方是否已下架 / 404） ----
   const AUDIO_EXT_RE = /\.(mp3|ogg|wav|m4a|aac|opus)$/i;
+  const VIDEO_EXT_RE = /\.(mp4|webm|mov|m3u8)$/i;
+  const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i;
 
   function probeImage(url, timeoutMs){
     return new Promise(resolve => {
@@ -658,8 +660,37 @@
     });
   }
 
+  function probeVideo(url, timeoutMs){
+    return new Promise(resolve => {
+      const video = document.createElement('video');
+      let done = false;
+      const timer = setTimeout(() => {
+        if(done) return;
+        done = true;
+        video.src = '';
+        resolve('unknown');
+      }, timeoutMs);
+      video.onloadedmetadata = function(){
+        if(done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve('alive');
+      };
+      video.onerror = function(){
+        if(done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve('gone');
+      };
+      video.preload = 'metadata';
+      video.src = url;
+    });
+  }
+
   function probeAsset(url, timeoutMs){
-    return AUDIO_EXT_RE.test(url) ? probeAudio(url, timeoutMs) : probeImage(url, timeoutMs);
+    if(AUDIO_EXT_RE.test(url)) return probeAudio(url, timeoutMs);
+    if(VIDEO_EXT_RE.test(url)) return probeVideo(url, timeoutMs);
+    return probeImage(url, timeoutMs);
   }
 
   async function runAliveCheck(){
@@ -754,7 +785,7 @@
 
   function showAllMissingImages(){
     const images = missingResults.filter((path, index) =>
-      missingStatus[index] !== 'gone' && !AUDIO_EXT_RE.test(path)
+      missingStatus[index] !== 'gone' && IMAGE_EXT_RE.test(path)
     );
     if(images.length === 0){
       checkStat.textContent = '沒有可顯示的缺漏圖片（全部已確認 404，或缺漏項目都是音檔）。';

@@ -3,11 +3,12 @@ console.log("[UW] 啟動外部副程式：WebSocket 攔截器已載入");
 
 (function(){
     const captured = []; // { len, url, data, time }
-    // 圖資缺漏檢查工具可直接解析這些路徑；不必先讓每個畫面都實際渲染一次。
+    // 圖資缺漏檢查工具可直接解析這些路徑。
     const assetPaths = new Set();
-    const scannedScripts = new Set();
-    const ASSET_PATH_RE = /(?:https?:\/\/[^\s"'<>\\]+\/)?[A-Za-z0-9_@.\-/]+\.(?:png|jpe?g|gif|webp|svg|avif|bmp|mp3|ogg|wav|m4a|aac|opus|uw)(?:[?#][^\s"'<>\\]*)?/gi;
-    const ASSET_EXT_RE = /\.(?:png|jpe?g|gif|webp|svg|avif|bmp|mp3|ogg|wav|m4a|aac|opus|uw)(?:[?#].*)?$/i;
+    const MEDIA_ORIGIN = 'https://media.komisureiya.com';
+    const ASSET_ROOT_RE = /^(?:images|audio|video)\//i;
+    const ASSET_PATH_RE = /(?:https?:\/\/[^\s"'<>\\]+\/)?[A-Za-z0-9_@.\-/]+\.(?:png|jpe?g|gif|webp|svg|avif|bmp|mp3|ogg|wav|m4a|aac|opus|mp4|webm|mov|m3u8|uw)(?:[?#][^\s"'<>\\]*)?/gi;
+    const ASSET_EXT_RE = /\.(?:png|jpe?g|gif|webp|svg|avif|bmp|mp3|ogg|wav|m4a|aac|opus|mp4|webm|mov|m3u8|uw)(?:[?#].*)?$/i;
 
     function addCapture(url, data){
         captured.push({
@@ -22,10 +23,16 @@ console.log("[UW] 啟動外部副程式：WebSocket 攔截器已載入");
     function normalizeAssetPath(value){
         if(!value) return '';
         let path = String(value).trim().replace(/\\\//g, '/');
+        if(/^https?:\/\//i.test(path)){
+            try{
+                const url = new URL(path);
+                if(url.origin !== MEDIA_ORIGIN) return '';
+                path = url.pathname;
+            }catch(e){ return ''; }
+        }
         path = path.replace(/[?#].*$/, '');
-        path = path.replace(/^https?:\/\/[^/]+\//i, '');
         path = path.replace(/^\/+/, '');
-        return ASSET_EXT_RE.test(path) ? path : '';
+        return ASSET_ROOT_RE.test(path) && ASSET_EXT_RE.test(path) ? path : '';
     }
 
     function collectAssetPaths(text){
@@ -44,7 +51,7 @@ console.log("[UW] 啟動外部副程式：WebSocket 攔截器已載入");
         return added;
     }
 
-    // 不會主動載入遊戲畫面；只從目前已取得的資源與同源程式碼找出靜態圖資路徑。
+    // 不讀取任何 JS 原始碼，也不主動下載圖資；只收集目前頁面實際載入的三種圖資網址。
     function scanLoadedAssets(){
         let added = 0;
         const scan = value => { added += collectAssetPaths(value || ''); };
@@ -56,18 +63,7 @@ console.log("[UW] 啟動外部副程式：WebSocket 攔截器已載入");
             scan(el.currentSrc || el.src || el.href);
         });
 
-        document.querySelectorAll('script[src]').forEach(script => {
-            const src = script.src;
-            if(!src || scannedScripts.has(src)) return;
-            // 只讀取和遊戲同一個網域的 JS；不碰第三方腳本，也不送出任何遊戲操作。
-            if(new URL(src, location.href).origin !== location.origin) return;
-            scannedScripts.add(src);
-            fetch(src).then(resp => resp.ok ? resp.text() : '').then(source => {
-                const found = collectAssetPaths(source);
-                if(found) flashStatus('自動掃描新增 ' + found + ' 筆圖資（共 ' + assetPaths.size + ' 筆）');
-            }).catch(() => {});
-        });
-        if(added) flashStatus('掃描完成，圖資清單共 ' + assetPaths.size + ' 筆');
+        if(added) flashStatus('已載入資源掃描完成，圖資清單共 ' + assetPaths.size + ' 筆');
         return added;
     }
 
@@ -182,7 +178,7 @@ console.log("[UW] 啟動外部副程式：WebSocket 攔截器已載入");
                 <div class="uw-count">已攔截 <b id="uw-count">0</b> 筆大型封包(大於 500 個字元)</div>
                 <div class="uw-assets">自動找到 <b id="uw-assets">0</b> 筆圖資路徑</div>
                 <div class="uw-row">
-                    <button id="uw-scan">重新掃描</button>
+                    <button id="uw-scan">掃描已載入圖資</button>
                     <button id="uw-assets-copy">複製圖資</button>
                 </div>
                 <div class="uw-row">
@@ -321,7 +317,19 @@ console.log("[UW] 啟動外部副程式：WebSocket 攔截器已載入");
         scanLoadedAssets();
     }
 
-    // 遊戲切換時才掃新插入的 script/resource。畫面批次重繪時合併成一次，避免頻繁掃描。
+    // 直接觀察新發出的資源請求，無須讀取 JS 原始碼；只會保留三個指定路徑前綴的圖資。
+    if(window.PerformanceObserver){
+        try{
+            const resourceObserver = new PerformanceObserver(function(list){
+                let added = 0;
+                list.getEntries().forEach(function(entry){ added += collectAssetPaths(entry.name); });
+                if(added) flashStatus('偵測到新載入圖資 ' + added + ' 筆（共 ' + assetPaths.size + ' 筆）');
+            });
+            resourceObserver.observe({type: 'resource', buffered: true});
+        }catch(e){}
+    }
+
+    // 遊戲切換時補掃 DOM 內的新圖片／音訊／影片節點。畫面批次重繪時合併成一次。
     let scheduledScan = null;
     function scheduleAssetScan(){
         if(scheduledScan) return;
