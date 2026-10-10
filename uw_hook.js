@@ -45,7 +45,8 @@ console.log("[UW] 圖資路徑掃描器已載入（不依賴 WebSocket）");
         return added;
     }
 
-    // 只讀取目前網域已載入的 JS 原始碼；不依賴 WebSocket，也不下載圖資檔本身。
+    // 嘗試讀取頁面已載入的 JS 原始碼；不依賴 WebSocket，也不下載圖資檔本身。
+    // 跨網域 JS 只有在伺服器允許瀏覽器讀取時才會成功，失敗時直接略過。
     function scanLoadedAssets(){
         let scriptsFound = 0;
         let inlineFound = 0;
@@ -55,13 +56,17 @@ console.log("[UW] 圖資路徑掃描器已載入（不依賴 WebSocket）");
         document.querySelectorAll('script[src]').forEach(script => {
             const src = script.src;
             if(!src || scannedScripts.has(src)) return;
-            if(new URL(src, location.href).origin !== location.origin) return;
             scannedScripts.add(src);
             scriptsFound++;
-            fetch(src).then(resp => resp.ok ? resp.text() : '').then(source => {
+            fetch(src).then(resp => {
+                if(!resp.ok) throw new Error('HTTP ' + resp.status);
+                return resp.text();
+            }).then(source => {
                 const found = collectAssetPaths(source);
                 if(found) flashStatus('JS 掃描新增 ' + found + ' 筆圖資（共 ' + assetPaths.size + ' 筆）');
-            }).catch(() => {});
+            }).catch(() => {
+                console.debug('[UW] 無法讀取 JS（可能未開放跨網域讀取）：', src);
+            });
         });
         if(scriptsFound) flashStatus('開始掃描 ' + scriptsFound + ' 個同源 JS 檔');
         else if(inlineFound) flashStatus('內嵌 JS 新增 ' + inlineFound + ' 筆圖資');
