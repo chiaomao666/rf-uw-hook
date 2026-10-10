@@ -22,6 +22,10 @@ console.log("[UW] 圖資路徑掃描器已載入（不依賴 WebSocket）");
         }
         path = path.replace(/[?#].*$/, '');
         path = path.replace(/^\/+/, '');
+        // JS 有時會以 ../images/ 或 assets/passionfruit/images/ 形式寫路徑；
+        // 統一截成 CDN 實際使用的 images/、audio/、video/ 相對路徑。
+        const rootedPath = path.match(/(?:^|\/)((?:images|audio|video)\/.*)$/i);
+        if(rootedPath) path = rootedPath[1];
         return ASSET_ROOT_RE.test(path) && ASSET_EXT_RE.test(path) ? path : '';
     }
 
@@ -44,6 +48,10 @@ console.log("[UW] 圖資路徑掃描器已載入（不依賴 WebSocket）");
     // 只讀取目前網域已載入的 JS 原始碼；不依賴 WebSocket，也不下載圖資檔本身。
     function scanLoadedAssets(){
         let scriptsFound = 0;
+        let inlineFound = 0;
+        document.querySelectorAll('script:not([src])').forEach(script => {
+            inlineFound += collectAssetPaths(script.textContent || '');
+        });
         document.querySelectorAll('script[src]').forEach(script => {
             const src = script.src;
             if(!src || scannedScripts.has(src)) return;
@@ -56,7 +64,9 @@ console.log("[UW] 圖資路徑掃描器已載入（不依賴 WebSocket）");
             }).catch(() => {});
         });
         if(scriptsFound) flashStatus('開始掃描 ' + scriptsFound + ' 個同源 JS 檔');
-        return scriptsFound;
+        else if(inlineFound) flashStatus('內嵌 JS 新增 ' + inlineFound + ' 筆圖資');
+        else if(assetPaths.size === 0) flashStatus('尚未在可讀 JS 中找到圖資路徑');
+        return scriptsFound + inlineFound;
     }
 
     function formatAssetList(){
