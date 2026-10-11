@@ -1,32 +1,31 @@
-// uw_hook.js - 同源 JS 圖資路徑掃描器
-console.log("[UW] 圖資路徑掃描器已載入（不依賴 WebSocket）");
+// uw_hook.js - 獨立的 WebSocket 攔截副程式（v2：加上頁面內面板，方便一鍵複製/下載側錄結果）
+console.log("[UW] 啟動外部副程式：WebSocket 攔截器已載入");
 
 (function(){
-    // 圖資缺漏檢查工具可直接解析這些路徑。
+    const captured = []; // { len, url, data, time }
+    // 圖資缺漏檢查工具可直接解析這些路徑；不必先讓每個畫面都實際渲染一次。
     const assetPaths = new Set();
     const scannedScripts = new Set();
-    const MEDIA_ORIGIN = 'https://media.komisureiya.com';
-    const ASSET_ROOT_RE = /^(?:images|audio|video)\//i;
-    const ASSET_PATH_RE = /(?:https?:\/\/[^\s"'<>\\]+\/)?[A-Za-z0-9_@.\-/]+\.(?:png|jpe?g|gif|webp|svg|avif|bmp|mp3|ogg|wav|m4a|aac|opus|mp4|webm|mov|m3u8|uw)(?:[?#][^\s"'<>\\]*)?/gi;
-    const ASSET_EXT_RE = /\.(?:png|jpe?g|gif|webp|svg|avif|bmp|mp3|ogg|wav|m4a|aac|opus|mp4|webm|mov|m3u8|uw)(?:[?#].*)?$/i;
+    const ASSET_PATH_RE = /(?:https?:\/\/[^\s"'<>\\]+\/)?[A-Za-z0-9_@.\-/]+\.(?:png|jpe?g|gif|webp|svg|avif|bmp|mp3|ogg|wav|m4a|aac|opus|uw)(?:[?#][^\s"'<>\\]*)?/gi;
+    const ASSET_EXT_RE = /\.(?:png|jpe?g|gif|webp|svg|avif|bmp|mp3|ogg|wav|m4a|aac|opus|uw)(?:[?#].*)?$/i;
+
+    function addCapture(url, data){
+        captured.push({
+            len: data.length,
+            url: url || '(unknown)',
+            data: data,
+            time: new Date().toLocaleTimeString()
+        });
+        updatePanel();
+    }
 
     function normalizeAssetPath(value){
         if(!value) return '';
         let path = String(value).trim().replace(/\\\//g, '/');
-        if(/^https?:\/\//i.test(path)){
-            try{
-                const url = new URL(path);
-                if(url.origin !== MEDIA_ORIGIN) return '';
-                path = url.pathname;
-            }catch(e){ return ''; }
-        }
         path = path.replace(/[?#].*$/, '');
+        path = path.replace(/^https?:\/\/[^/]+\//i, '');
         path = path.replace(/^\/+/, '');
-        // JS 有時會以 ../images/ 或 assets/passionfruit/images/ 形式寫路徑；
-        // 統一截成 CDN 實際使用的 images/、audio/、video/ 相對路徑。
-        const rootedPath = path.match(/(?:^|\/)((?:images|audio|video)\/.*)$/i);
-        if(rootedPath) path = rootedPath[1];
-        return ASSET_ROOT_RE.test(path) && ASSET_EXT_RE.test(path) ? path : '';
+        return ASSET_EXT_RE.test(path) ? path : '';
     }
 
     function collectAssetPaths(text){
@@ -45,33 +44,31 @@ console.log("[UW] 圖資路徑掃描器已載入（不依賴 WebSocket）");
         return added;
     }
 
-    // 嘗試讀取頁面已載入的 JS 原始碼；不依賴 WebSocket，也不下載圖資檔本身。
-    // 跨網域 JS 只有在伺服器允許瀏覽器讀取時才會成功，失敗時直接略過。
+    // 不會主動載入遊戲畫面；只從目前已取得的資源與同源程式碼找出靜態圖資路徑。
     function scanLoadedAssets(){
-        let scriptsFound = 0;
-        let inlineFound = 0;
-        document.querySelectorAll('script:not([src])').forEach(script => {
-            inlineFound += collectAssetPaths(script.textContent || '');
+        let added = 0;
+        const scan = value => { added += collectAssetPaths(value || ''); };
+
+        try{
+            performance.getEntriesByType('resource').forEach(entry => scan(entry.name));
+        }catch(e){}
+        document.querySelectorAll('img[src],audio[src],video[src],source[src],link[href]').forEach(el => {
+            scan(el.currentSrc || el.src || el.href);
         });
+
         document.querySelectorAll('script[src]').forEach(script => {
             const src = script.src;
             if(!src || scannedScripts.has(src)) return;
+            // 只讀取和遊戲同一個網域的 JS；不碰第三方腳本，也不送出任何遊戲操作。
+            if(new URL(src, location.href).origin !== location.origin) return;
             scannedScripts.add(src);
-            scriptsFound++;
-            fetch(src).then(resp => {
-                if(!resp.ok) throw new Error('HTTP ' + resp.status);
-                return resp.text();
-            }).then(source => {
+            fetch(src).then(resp => resp.ok ? resp.text() : '').then(source => {
                 const found = collectAssetPaths(source);
-                if(found) flashStatus('JS 掃描新增 ' + found + ' 筆圖資（共 ' + assetPaths.size + ' 筆）');
-            }).catch(() => {
-                console.debug('[UW] 無法讀取 JS（可能未開放跨網域讀取）：', src);
-            });
+                if(found) flashStatus('自動掃描新增 ' + found + ' 筆圖資（共 ' + assetPaths.size + ' 筆）');
+            }).catch(() => {});
         });
-        if(scriptsFound) flashStatus('開始掃描 ' + scriptsFound + ' 個同源 JS 檔');
-        else if(inlineFound) flashStatus('內嵌 JS 新增 ' + inlineFound + ' 筆圖資');
-        else if(assetPaths.size === 0) flashStatus('尚未在可讀 JS 中找到圖資路徑');
-        return scriptsFound + inlineFound;
+        if(added) flashStatus('掃描完成，圖資清單共 ' + assetPaths.size + ' 筆');
+        return added;
     }
 
     function formatAssetList(){
@@ -104,8 +101,45 @@ console.log("[UW] 圖資路徑掃描器已載入（不依賴 WebSocket）");
         flashStatus('已下載 ' + assetPaths.size + ' 筆圖資路徑；可直接匯入缺漏檢查工具');
     }
 
+    // ---- 攔截 WebSocket ----
+    if (window.WebSocket) {
+        const OriginalWebSocket = window.WebSocket;
+
+        window.WebSocket = function(url, protocols) {
+            console.log("[UW] [WebSocket] 攔截到連線，目標: ", url);
+            const ws = protocols === undefined
+                ? new OriginalWebSocket(url)
+                : new OriginalWebSocket(url, protocols);
+
+            ws.addEventListener('message', function(event) {
+                if (typeof event.data === 'string') {
+                    // 小封包也可能只帶一個 icon/image 路徑，因此不再只看大型封包。
+                    collectAssetPaths(event.data);
+                    // 【全量側錄】只要資料長度大於 500 個字元（通常代表一次傳來大量清單），就存起來！
+                    if (event.data.length > 500) {
+                        console.log("[UW] [發現大型資料包！長度: " + event.data.length + "]", event.data);
+                        addCapture(url, event.data);
+                    }
+                }
+            });
+
+            const originalSend = ws.send;
+            ws.send = function(data) {
+                if (typeof data === 'string') {
+                    if (data.includes('actor') || data.includes('pool')) {
+                        console.log("[UW] [發送請求]", data);
+                    }
+                }
+                return originalSend.apply(this, arguments);
+            };
+            return ws;
+        };
+        window.WebSocket.prototype = OriginalWebSocket.prototype;
+        Object.setPrototypeOf(window.WebSocket, OriginalWebSocket);
+    }
+
     // ---- 頁面內面板 ----
-    let panelEl, assetCountEl, statusEl;
+    let panelEl, countEl, assetCountEl, statusEl;
 
     function buildPanel(){
         const style = document.createElement('style');
@@ -131,6 +165,8 @@ console.log("[UW] 圖資路徑掃描器已載入（不依賴 WebSocket）");
                 font-family:inherit;
             }
             #uw-panel button:hover{background:#d9a441; color:#161810;}
+            #uw-panel .uw-count{color:#8b9284; font-size:11px;}
+            #uw-panel .uw-count b{color:#d9a441;}
             #uw-panel .uw-assets{color:#8b9284; font-size:11px; margin-top:4px;}
             #uw-panel .uw-assets b{color:#79b8a3;}
             #uw-panel .uw-status{color:#6f9b5c; font-size:10.5px; margin-top:6px; min-height:14px;}
@@ -142,29 +178,41 @@ console.log("[UW] 圖資路徑掃描器已載入（不依賴 WebSocket）");
         panelEl.id = 'uw-panel';
         panelEl.innerHTML = `
             <div class="uw-head" id="uw-drag">
-                <b>[UW] 圖資掃描</b>
+                <b>[UW] 側錄面板</b>
                 <span class="uw-min" id="uw-min">—</span>
             </div>
             <div class="uw-body" id="uw-body">
-                <div class="uw-assets">從同源 JS 找到 <b id="uw-assets">0</b> 筆圖資路徑</div>
+                <div class="uw-count">已攔截 <b id="uw-count">0</b> 筆大型封包(大於 500 個字元)</div>
+                <div class="uw-assets">自動找到 <b id="uw-assets">0</b> 筆圖資路徑</div>
                 <div class="uw-row">
-                    <button id="uw-scan">重新掃描圖資路徑</button>
+                    <button id="uw-scan">重新掃描</button>
                     <button id="uw-assets-copy">複製圖資</button>
                 </div>
                 <div class="uw-row">
                     <button id="uw-assets-dl">下載圖資 .txt</button>
+                </div>
+                <div class="uw-row">
+                    <button id="uw-copy">複製全部</button>
+                    <button id="uw-dl">下載 .txt</button>
+                </div>
+                <div class="uw-row">
+                    <button id="uw-clear">清空</button>
                 </div>
                 <div class="uw-status" id="uw-status"></div>
             </div>
         `;
         document.body.appendChild(panelEl);
 
+        countEl = document.getElementById('uw-count');
         assetCountEl = document.getElementById('uw-assets');
         statusEl = document.getElementById('uw-status');
 
         document.getElementById('uw-scan').addEventListener('click', scanLoadedAssets);
         document.getElementById('uw-assets-copy').addEventListener('click', copyAssetList);
         document.getElementById('uw-assets-dl').addEventListener('click', downloadAssetList);
+        document.getElementById('uw-copy').addEventListener('click', copyAll);
+        document.getElementById('uw-dl').addEventListener('click', downloadAll);
+        document.getElementById('uw-clear').addEventListener('click', clearAll);
 
         // 收合/展開
         const body = document.getElementById('uw-body');
@@ -195,6 +243,14 @@ console.log("[UW] 圖資路徑掃描器已載入（不依賴 WebSocket）");
         document.addEventListener('mouseup', function(){ dragging = false; });
     }
 
+    function formatAll(){
+        return captured.map(c =>
+            `[UW] [封包 時間:${c.time} 長度:${c.len} URL:${c.url}]\n${c.data}`
+        ).join('\n\n---\n\n');
+    }
+
+    const LARGE_WARN_LEN = 3 * 1024 * 1024; // 約 3MB 文字，超過就提醒改用下載比較保險
+
     function legacyCopyFallback(text){
         // navigator.clipboard 在某些情況（頁面失焦、內容過大、部分瀏覽器安全限制）會直接失敗且不丟明確錯誤
         // 用傳統 execCommand 當備援方案再試一次
@@ -214,7 +270,41 @@ console.log("[UW] 圖資路徑掃描器已載入（不依賴 WebSocket）");
         }
     }
 
+    function copyAll(){
+        if(captured.length === 0){ flashStatus('目前沒有側錄到任何資料'); return; }
+        const text = formatAll();
+
+        if(text.length > LARGE_WARN_LEN){
+            flashStatus('資料量偏大(' + (text.length/1024/1024).toFixed(1) + 'MB)，複製可能失敗，建議改用下載 .txt');
+        }
+
+        navigator.clipboard.writeText(text).then(function(){
+            flashStatus('已複製 ' + captured.length + ' 筆到剪貼簿 ✓');
+        }).catch(function(){
+            const ok = legacyCopyFallback(text);
+            flashStatus(ok ? '已複製 ' + captured.length + ' 筆到剪貼簿 ✓（備援方式）' : '複製失敗，資料量可能太大，請改用下載 .txt');
+        });
+    }
+
+    function downloadAll(){
+        if(captured.length === 0){ flashStatus('目前沒有側錄到任何資料'); return; }
+        const blob = new Blob([formatAll()], {type:'text/plain'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'uw_capture_' + Date.now() + '.txt';
+        a.click();
+        URL.revokeObjectURL(a.href);
+        flashStatus('已下載 ' + captured.length + ' 筆');
+    }
+
+    function clearAll(){
+        captured.length = 0;
+        updatePanel();
+        flashStatus('已清空');
+    }
+
     function updatePanel(){
+        if(countEl) countEl.textContent = captured.length;
         if(assetCountEl) assetCountEl.textContent = assetPaths.size;
     }
 
@@ -234,7 +324,7 @@ console.log("[UW] 圖資路徑掃描器已載入（不依賴 WebSocket）");
         scanLoadedAssets();
     }
 
-    // 遊戲切換時補掃新插入的同源 JS 節點。畫面批次重繪時合併成一次。
+    // 遊戲切換時才掃新插入的 script/resource。畫面批次重繪時合併成一次，避免頻繁掃描。
     let scheduledScan = null;
     function scheduleAssetScan(){
         if(scheduledScan) return;
