@@ -264,12 +264,12 @@
       </div>
       <div class="stat" id="folderStat"></div>
       <div class="generator">
-        <div class="generator-title">依現有角色 ID 檢查圖資</div>
-        <p class="hint">選擇資料夾後，自動加入現有角色與造型 ID 對應的圖資清單，例如 FROR06、CM01A、TB04A1；保留完整 ID，不需要輸入編號。</p>
+        <div class="generator-title">自動產生圖資檢查清單</div>
+        <p class="hint">選擇資料夾後，自動加入角色、造型、劇情角色圖、街景、禮包、招呼圖、道具、劇情背景與 uw 圖資。角色沿用現有完整 ID；其他編號系列補齊已知範圍，日期型招呼圖只使用已知日期，不需要輸入編號。</p>
         <div class="row">
-          <button id="generateIdsBtn" class="secondary" disabled>重新加入現有角色圖資</button>
+          <button id="generateIdsBtn" class="secondary" disabled>重新產生圖資清單</button>
         </div>
-        <div class="stat" id="generatorStat">請先選擇資料夾，工具會自動使用現有角色 ID。</div>
+        <div class="stat" id="generatorStat">請先選擇資料夾，工具會自動使用現有 ID 與已知圖資規律。</div>
       </div>
     </div>
   </div>
@@ -326,6 +326,7 @@
   <footer>本工具僅在瀏覽器本機執行，不會將任何側錄內容或檔案清單傳送到外部伺服器</footer>
 </div>
 
+<script src="asset-generator.js"></script>
 <script>
 (function(){
   const MEDIA_EXT = /(png|jpe?g|gif|webp|svg|avif|bmp|mp3|ogg|wav|m4a|aac|opus|mp4|webm|mov|m3u8|uw)/i;
@@ -339,6 +340,8 @@
   ];
   let requiredAssets = new Set(KNOWN_HARDCODED_ASSETS);   // normalized path strings, e.g. "units/tank_01.png"
   let localFiles = [];              // {name, relPath} both lowercased for matching
+  let localPathIndex = new Set();
+  let generatedAssets = new Set();
   let missingResults = [];          // array of required path strings currently missing
   let missingStatus = [];           // parallel array: null | 'alive' | 'gone' (set by the availability checker)
   let downloadItems = [];           // { path, done }，僅供手動下載進度標記
@@ -395,75 +398,42 @@
     compareBtn.disabled = !(requiredAssets.size > 0 && localFiles.length > 0);
   }
 
-  function getKnownCharacterIds(){
-    // 從角色主視覺保留完整 ID，包含純英文字與 A1 等造型尾碼。
-    const patterns = [
-      /(?:^|\/)images\/actor\/gif\/tachie([a-z][a-z0-9]*)\.gif$/i,
-      /(?:^|\/)images\/actor\/head\/avatar([a-z][a-z0-9]*)\.png$/i,
-      /(?:^|\/)images\/actor\/half_full\/([a-z][a-z0-9]*)\.png$/i
-    ];
-    const ids = new Set();
-    localFiles.forEach(file => {
-      for(const pattern of patterns){
-        const match = file.relPath.match(pattern);
-        if(!match) continue;
-        ids.add(match[1].toUpperCase());
-        break;
-      }
-    });
-    return ids;
-  }
-
   function refreshGeneratorState(){
-    const ids = getKnownCharacterIds();
-    generateIdsBtn.disabled = ids.size === 0;
-    if(!ids.size){
-      generatorStat.textContent = localFiles.length
-        ? '這個資料夾尚未找到角色主視覺 ID（tachie、avatar 或 half_full）。'
-        : '請先選擇資料夾，工具會自動使用現有角色 ID。';
+    generatedAssets.forEach(path => requiredAssets.delete(path));
+    generatedAssets.clear();
+    localPathIndex = new Set(localFiles.map(file => {
+      const path = file.originalPath || file.relPath;
+      const rooted = path.match(/(?:^|\/)((?:images|audio|video)\/.+)$/i);
+      return (rooted ? rooted[1] : path).toLowerCase();
+    }));
+    generateIdsBtn.disabled = localFiles.length === 0;
+    if(!localFiles.length){
+      generatorStat.textContent = '請先選擇資料夾，工具會自動使用現有 ID 與已知圖資規律。';
       return;
     }
-    addExistingCharacterAssets();
+    addSelectedAssets();
   }
 
-  function buildCharacterAssetPaths(id){
-    const battleId = id + 'R';
-    return [
-      'video/recruit/' + id + '.mp4',
-      'audio/battle/' + battleId + 'b1.mp3',
-      'audio/battle/' + battleId + 'b2.mp3',
-      'images/actor/gif/tachie' + id + '.gif',
-      'images/actor/half/bust' + id + '.png',
-      'images/actor/half_full/' + id + '.png',
-      'images/actor/head/avatar' + id + '.png',
-      'images/actor/head/smallavatar' + id + '.png',
-      'images/actor/piece/esoterica' + id + '.png',
-      'images/active_skill/SK' + id + '_1.png',
-      'images/site/street/svspc_' + id + '.png',
-      'images/actor/battle/' + battleId + '/' + battleId + 'a1.png',
-      'images/actor/battle/' + battleId + '/' + battleId + 'a2.png',
-      'images/actor/battle/' + battleId + '/' + battleId + 'b1.png',
-      'images/actor/battle/' + battleId + '/' + battleId + 'b2.png',
-      'images/actor/battle/' + battleId + '/' + battleId + 'c2.png',
-      'images/actor/battle/' + battleId + '/' + battleId + 'c3.png',
-      'images/actor/battle/' + battleId + '/' + battleId + 'c7.png',
-      'images/actor/battle/' + battleId + '/' + battleId + 'c8.png'
-    ];
-  }
-
-  function addExistingCharacterAssets(){
-    const ids = getKnownCharacterIds();
+  function addSelectedAssets(){
+    if(!window.UWAssetGenerator){
+      generatorStat.textContent = '圖資生成規則尚未載入，請重新整理網頁後再試。';
+      return;
+    }
+    const generated = UWAssetGenerator.generate(localFiles.map(file => file.originalPath || file.relPath));
     let added = 0;
-    ids.forEach(id => buildCharacterAssetPaths(id).forEach(path => {
-      if(!requiredAssets.has(path)){
+    const existing = new Set(Array.from(requiredAssets, path => path.toLowerCase()));
+    generated.paths.forEach(path => {
+      if(!existing.has(path.toLowerCase())){
         requiredAssets.add(path);
+        generatedAssets.add(path);
+        existing.add(path.toLowerCase());
         added++;
       }
-    }));
-    generatorStat.innerHTML = '已使用 <b>' + ids.size + '</b> 個現有角色 ID，新增 <b>' + added + '</b> 筆候選圖資。按「執行比對」即可確認實際存在項目。';
+    });
+    generatorStat.innerHTML = '已使用 <b>' + generated.ids.size + '</b> 個現有角色 ID 與選定的圖資系列，新增 <b>' + added + '</b> 筆候選圖資。按「執行比對」即可確認實際存在項目。';
     updateCompareEnabled();
   }
-  generateIdsBtn.addEventListener('click', addExistingCharacterAssets);
+  generateIdsBtn.addEventListener('click', addSelectedAssets);
 
   parseBtn.addEventListener('click', function(){
     const raw = logInput.value;
@@ -493,8 +463,8 @@
 
   clearLogBtn.addEventListener('click', function(){
     logInput.value = '';
-    requiredAssets = new Set(KNOWN_HARDCODED_ASSETS);
-    parseStat.textContent = '已清空解析結果（內建的固定資源仍保留）';
+    requiredAssets = new Set([...KNOWN_HARDCODED_ASSETS, ...generatedAssets]);
+    parseStat.textContent = '已清空解析結果（固定資源與自動生成清單仍保留）';
     updateCompareEnabled();
   });
 
@@ -556,7 +526,7 @@
     const files = [];
     for await(const entry of folder.values()){
       const relPath = prefix ? prefix + '/' + entry.name : entry.name;
-      if(entry.kind === 'file') files.push({ name: entry.name.toLowerCase(), relPath: relPath.toLowerCase() });
+      if(entry.kind === 'file') files.push({ name: entry.name.toLowerCase(), relPath: relPath.toLowerCase(), originalPath: relPath });
       else if(entry.kind === 'directory') files.push(...await readFolderHandle(entry, relPath));
     }
     return files;
@@ -570,7 +540,8 @@
     }
     try{
       localFolderHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
-      localFiles = await readFolderHandle(localFolderHandle, '');
+      const mediaRoot = /^(images|audio|video)$/i.test(localFolderHandle.name) ? localFolderHandle.name.toLowerCase() : '';
+      localFiles = await readFolderHandle(localFolderHandle, mediaRoot);
       folderStat.innerHTML = '已讀取 <b>' + localFolderHandle.name + '</b>，共 <b>' + localFiles.length + '</b> 個檔案';
       refreshGeneratorState();
       updateCompareEnabled();
@@ -586,7 +557,9 @@
       // drop the top-level folder name from the relative path for matching
       const parts = rel.split('/');
       const relNoRoot = parts.length > 1 ? parts.slice(1).join('/') : rel;
-      return { name: f.name.toLowerCase(), relPath: relNoRoot.toLowerCase() };
+      const mediaRoot = /^(images|audio|video)$/i.test(parts[0]) ? parts[0].toLowerCase() + '/' : '';
+      const originalPath = mediaRoot + relNoRoot;
+      return { name: f.name.toLowerCase(), relPath: originalPath.toLowerCase(), originalPath };
     });
     folderStat.innerHTML = '已讀取資料夾，共 <b>' + localFiles.length + '</b> 個檔案';
     localFolderHandle = null;
@@ -604,9 +577,9 @@
   });
 
   function isLocallyPresent(reqPath){
-    const bn = basename(reqPath);
     const rp = reqPath.toLowerCase();
-    return localFiles.some(f => f.name === bn || f.relPath === rp || f.relPath.endsWith('/' + bn));
+    if(/^(?:images|audio|video)\//i.test(rp)) return localPathIndex.has(rp);
+    return localFiles.some(f => f.relPath === rp || f.relPath.endsWith('/' + rp));
   }
 
   function calcPct(matched, total){
