@@ -327,6 +327,7 @@
 </div>
 
 <script src="asset-generator.js"></script>
+<script src="asset-checker.js"></script>
 <script>
 (function(){
   const MEDIA_EXT = /(png|jpe?g|gif|webp|svg|avif|bmp|mp3|ogg|wav|m4a|aac|opus|mp4|webm|mov|m3u8|uw)/i;
@@ -342,6 +343,7 @@
   let localFiles = [];              // {name, relPath} both lowercased for matching
   let localPathIndex = new Set();
   let generatedAssets = new Set();
+  let checkingAssets = false;
   let missingResults = [];          // array of required path strings currently missing
   let missingStatus = [];           // parallel array: null | 'alive' | 'gone' (set by the availability checker)
   let downloadItems = [];           // { path, done }，僅供手動下載進度標記
@@ -395,7 +397,7 @@
   }
 
   function updateCompareEnabled(){
-    compareBtn.disabled = !(requiredAssets.size > 0 && localFiles.length > 0);
+    compareBtn.disabled = checkingAssets || !(requiredAssets.size > 0 && localFiles.length > 0);
   }
 
   function refreshGeneratorState(){
@@ -590,6 +592,7 @@
   }
 
   compareBtn.addEventListener('click', async function(){
+    if(checkingAssets) return;
     const base = baseUrlInput.value.trim().replace(/\/+$/, '');
     const all = Array.from(requiredAssets).sort();
     let matched = 0;
@@ -632,9 +635,9 @@
         row.dataset.idx = i;
         const url = base + '/' + p;
         const badge = document.createElement('span');
-        badge.className = 'badge miss';
+        badge.className = 'badge checking';
         badge.dataset.role = 'badge';
-        badge.textContent = '缺';
+        badge.textContent = '?';
         const path = document.createElement('span');
         path.className = 'path';
         path.textContent = p;
@@ -656,8 +659,17 @@
     updateNextMissingLabel();
 
     if(missingResults.length > 0){
-      await runAliveCheck();
-      downloadAllBtn.disabled = false;
+      checkingAssets = true;
+      updateCompareEnabled();
+      try{
+        await runAliveCheck();
+        downloadAllBtn.disabled = false;
+      }catch(error){
+        checkStat.textContent = '檢查未完成，請再按一次「執行比對」：' + error.message;
+      }finally{
+        checkingAssets = false;
+        updateCompareEnabled();
+      }
     }else{
       checkStat.textContent = '沒有缺漏項目，不需檢查';
     }
@@ -668,83 +680,41 @@
   const VIDEO_EXT_RE = /\.(mp4|webm|mov|m3u8)$/i;
   const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i;
 
-  function probeImage(url, timeoutMs){
+  function probeElement(element, url, timeoutMs, media){
     return new Promise(resolve => {
-      const img = new Image();
       let done = false;
-      const timer = setTimeout(() => {
-        if(done) return;
-        done = true;
-        resolve('unknown'); // 逾時，狀態不明（可能是網路慢，不代表不存在）
-      }, timeoutMs);
-      img.onload = function(){
+      const finish = status => {
         if(done) return;
         done = true;
         clearTimeout(timer);
-        resolve('alive');
+        element.onload = element.onloadedmetadata = element.onerror = null;
+        element.removeAttribute('src');
+        if(media) element.load();
+        resolve(status);
       };
-      img.onerror = function(){
-        if(done) return;
-        done = true;
-        clearTimeout(timer);
-        resolve('gone');
-      };
-      img.src = url;
+      const timer = setTimeout(() => finish('unknown'), timeoutMs);
+      if(media){
+        element.preload = 'metadata';
+        element.onloadedmetadata = () => finish('alive');
+      }else{
+        element.decoding = 'async';
+        element.onload = () => finish('alive');
+      }
+      element.onerror = () => finish('gone');
+      element.src = url;
     });
+  }
+
+  function probeImage(url, timeoutMs){
+    return probeElement(new Image(), url, timeoutMs, false);
   }
 
   function probeAudio(url, timeoutMs){
-    return new Promise(resolve => {
-      const audio = new Audio();
-      let done = false;
-      const timer = setTimeout(() => {
-        if(done) return;
-        done = true;
-        audio.src = ''; // 停止載入
-        resolve('unknown');
-      }, timeoutMs);
-      audio.oncanplay = audio.onloadeddata = function(){
-        if(done) return;
-        done = true;
-        clearTimeout(timer);
-        resolve('alive');
-      };
-      audio.onerror = function(){
-        if(done) return;
-        done = true;
-        clearTimeout(timer);
-        resolve('gone');
-      };
-      audio.preload = 'auto';
-      audio.src = url;
-    });
+    return probeElement(new Audio(), url, timeoutMs, true);
   }
 
   function probeVideo(url, timeoutMs){
-    return new Promise(resolve => {
-      const video = document.createElement('video');
-      let done = false;
-      const timer = setTimeout(() => {
-        if(done) return;
-        done = true;
-        video.src = '';
-        resolve('unknown');
-      }, timeoutMs);
-      video.onloadedmetadata = function(){
-        if(done) return;
-        done = true;
-        clearTimeout(timer);
-        resolve('alive');
-      };
-      video.onerror = function(){
-        if(done) return;
-        done = true;
-        clearTimeout(timer);
-        resolve('gone');
-      };
-      video.preload = 'metadata';
-      video.src = url;
-    });
+    return probeElement(document.createElement('video'), url, timeoutMs, true);
   }
 
   function probeAsset(url, timeoutMs){
@@ -753,58 +723,40 @@
     return probeImage(url, timeoutMs);
   }
 
+  let assetChecker = null;
   async function runAliveCheck(){
     const base = baseUrlInput.value.trim().replace(/\/+$/, '');
-    const CONCURRENCY = 4;
-    let goneCount = 0, aliveCount = 0, unknownCount = 0;
-    let cursor = 0;
-
-    function setBadge(idx, status){
-      const row = missingList.querySelector('.list-row[data-idx="' + idx + '"]');
-      if(!row) return;
-      const badge = row.querySelector('[data-role="badge"]');
-      row.classList.remove('is-gone');
-      if(status === 'alive'){
-        badge.className = 'badge miss';
-        badge.textContent = '缺';
-      } else if(status === 'gone'){
-        badge.className = 'badge gone';
-        badge.textContent = '404';
-        row.classList.add('is-gone');
-      } else {
-        badge.className = 'badge checking';
-        badge.textContent = '?';
-      }
+    if(!assetChecker){
+      let storage = null;
+      try{ storage = window.localStorage; }catch(error){}
+      assetChecker = UWAssetChecker.createChecker({probe:probeAsset, storage, concurrency:16});
     }
-
-    missingResults.forEach((p, i) => setBadge(i, 'checking'));
-    checkStat.textContent = '自動檢查中… 0 / ' + missingResults.length;
-
-    async function worker(){
-      while(cursor < missingResults.length){
-        const idx = cursor++;
-        const url = base + '/' + missingResults[idx];
-        const status = await probeAsset(url, 8000);
-        const resolved = status === 'checking' ? 'unknown' : status;
-        setBadge(idx, resolved);
-        missingStatus[idx] = resolved === 'alive' ? 'alive' : (resolved === 'gone' ? 'gone' : null);
-        if(status === 'gone') goneCount++;
-        else if(status === 'alive') aliveCount++;
-        else unknownCount++;
-        checkStat.innerHTML = '自動檢查中… <b>' + (goneCount+aliveCount+unknownCount) + '</b> / ' + missingResults.length +
-          '　已下架 <b>' + goneCount + '</b>　仍可下載 <b>' + aliveCount + '</b>' +
-          (unknownCount ? '　逾時未知 <b>' + unknownCount + '</b>' : '');
-        // 稍微間隔，避免對伺服器發出過密集的請求
-        await new Promise(r => setTimeout(r, 120));
+    // Keep direct row references: thousands of results should not require
+    // repeatedly searching the whole list for each completed request.
+    const rows = Array.from(missingList.children);
+    const badges = rows.map(row => row.querySelector('[data-role="badge"]'));
+    const urls = missingResults.map(path => base + '/' + path);
+    const counts = await assetChecker.run(urls, {
+      onResult(index, status){
+        const row = rows[index], badge = badges[index];
+        if(!row || !badge) return;
+        row.classList.toggle('is-gone', status === 'gone');
+        badge.className = status === 'alive' ? 'badge miss' : status === 'gone' ? 'badge gone' : 'badge checking';
+        badge.textContent = status === 'alive' ? '缺' : status === 'gone' ? '404' : '?';
+        missingStatus[index] = status === 'unknown' ? null : status;
+      },
+      onProgress(counts){
+        checkStat.innerHTML = '自動檢查中… <b>' + counts.completed + '</b> / ' + counts.total +
+          '　已下架 <b>' + counts.gone + '</b>　仍可下載 <b>' + counts.alive + '</b>' +
+          (counts.cached ? '　快取 <b>' + counts.cached + '</b>' : '') +
+          (counts.unknown ? '　逾時未知 <b>' + counts.unknown + '</b>' : '');
       }
-    }
-
-    await Promise.all(Array.from({length: Math.min(CONCURRENCY, missingResults.length)}, worker));
-
-    checkStat.innerHTML = '檢查完成：已下架(404) <b>' + goneCount + '</b> 筆　仍可下載 <b>' + aliveCount + '</b> 筆' +
-      (unknownCount ? '　逾時未知 <b>' + unknownCount + '</b> 筆（可再檢查一次）' : '');
-    if(goneCount > 0){
-      const adjTotal = lastTotal - goneCount;
+    });
+    checkStat.innerHTML = '檢查完成：已下架(404) <b>' + counts.gone + '</b> 筆　仍可下載 <b>' + counts.alive + '</b> 筆' +
+      (counts.cached ? '　使用快取 <b>' + counts.cached + '</b> 筆' : '') +
+      (counts.unknown ? '　逾時未知 <b>' + counts.unknown + '</b> 筆（可再檢查一次）' : '');
+    if(counts.gone > 0){
+      const adjTotal = lastTotal - counts.gone;
       const adjPct = calcPct(lastMatched, adjTotal);
       adjMeterWrap.style.display = 'block';
       adjPctText.textContent = adjPct + '%';
