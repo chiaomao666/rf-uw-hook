@@ -58,10 +58,11 @@ const element = id => {
 };
 const context = {
   window:{UWAssetGenerator:generator}, UWAssetGenerator:generator,
-  document:{getElementById:element}, console
+  document:{getElementById:element}, console,
+  FileReader:class {readAsText(file){this.onload({target:{result:file.text}});}}
 };
 vm.createContext(context);
-vm.runInContext(script.replace(/\}\)\(\);\s*$/, 'window.testPresent = isLocallyPresent; })();'), context);
+vm.runInContext(script.replace(/\}\)\(\);\s*$/, 'window.testPresent = isLocallyPresent; window.testRequired = () => Array.from(requiredAssets); })();'), context);
 element('folderInput').listeners.change({target:{files:[{
   name:'FROR06.png', webkitRelativePath:'images/actor/half_full/FROR06.png'
 }]}});
@@ -73,4 +74,23 @@ element('folderInput').listeners.change({target:{files:[{
 }]}});
 assert(context.window.testPresent('images/prop/ITC060.png'));
 assert(element('generatorStat').innerHTML.includes('0</b>'), 'Previous folder character IDs persisted');
+
+// A newly recorded outfit must appear even when it has no files locally yet.
+element('txtFileInput').listeners.change({target:{files:[{
+  name:'uw_asset_paths.txt',
+  text:'images/actor/gif/tachieTW05B.gif\nimages/actor/half/bustTW05B.png\nimages/site/street/svspc_TW05B.png'
+}]}});
+let required = context.window.testRequired();
+assert(required.includes('images/actor/gif/tachieTW05B.gif'), 'Upload did not automatically parse the new outfit');
+assert(required.includes('images/actor/head/avatarTW05B.png'), 'Recorded outfit ID did not feed the generator');
+assert(required.includes('images/actor/battle/TW05BR/TW05BRa1.png'));
+assert(!required.includes('images/actor/gif/tachietw05b.gif'), 'CDN path casing was changed');
+assert(!context.window.testPresent('images/actor/gif/tachieTW05B.gif'));
+element('logInput').value = 'Users/wuser/Desktop/2.28/assets/passionfruit/images/actor/gif/tachieTW05B.gif\nhttps://media.komisureiya.com/video/recruit/TW05B.mp4?version=2';
+element('parseBtn').listeners.click();
+required = context.window.testRequired();
+assert(required.includes('video/recruit/TW05B.mp4'), 'Recorded video path was not parsed');
+assert(!required.some(path => path.startsWith('Users/')), 'Local filesystem prefix leaked into CDN path');
+element('clearLogBtn').listeners.click();
+assert(!context.window.testRequired().includes('images/actor/gif/tachieTW05B.gif'), 'Cleared recording ID remained in the generator');
 console.log('Selected folders, exact IDs, numbering, greeting dates and page integration passed.');

@@ -231,7 +231,7 @@
   <div class="panel" data-step="STEP 01 — 側錄資料">
     <div class="panel-body">
       <h2>貼上 uw_hook.js 側錄的內容</h2>
-      <p class="hint">從 DevTools 主控台把攔截到的大型封包（[UW] [發現大型資料包...] 那幾行含 JSON 的內容）整段複製貼到下面，可以貼多次側錄結果、貼多段都沒關係，工具會自動去重複。</p>
+      <p class="hint">可貼上模組複製的圖資路徑或側錄封包，再按「解析圖資清單」；上傳 .txt 則會自動解析。側錄中發現的新角色與造型 ID 也會加入生成器，不必先下載到本機。</p>
       <textarea id="logInput" placeholder='例如：[UW] [發現大型資料包！長度: 15234] {"topic":"...","payload":{"pool":[{"icon":"units/tank_01.png",...}]}}'></textarea>
       <div class="row">
         <button id="parseBtn">解析圖資清單</button>
@@ -332,7 +332,7 @@
 (function(){
   const MEDIA_EXT = /(png|jpe?g|gif|webp|svg|avif|bmp|mp3|ogg|wav|m4a|aac|opus|mp4|webm|mov|m3u8|uw)/i;
   // token like path/to/file.ext , allow letters/numbers/_/-/./  (unicode-safe for filenames)
-  const pathRegex = /[A-Za-z0-9_\-\.\/]+\.(?:png|jpe?g|gif|webp|svg|avif|bmp|mp3|ogg|wav|m4a|aac|opus|uw)/gi;
+  const pathRegex = /[A-Za-z0-9_\-\.\/]+\.(?:png|jpe?g|gif|webp|svg|avif|bmp|mp3|ogg|wav|m4a|aac|opus|mp4|webm|mov|m3u8|uw)/gi;
   const keyRegex = /"(?:image|icon|avatar|portrait|asset|pic(?:ture)?|photo|thumbnail|banner|logo|sprite|texture|audio|music|sound|voice|bgm|se)[A-Za-z0-9_]*"\s*:\s*"([^"]+)"/gi;
 
   // 從 main.js 原始碼裡直接找到、寫死呼叫遠端下載的固定資源（不依賴側錄，工具一開就內建）
@@ -343,6 +343,7 @@
   let localFiles = [];              // {name, relPath} both lowercased for matching
   let localPathIndex = new Set();
   let generatedAssets = new Set();
+  let providedAssets = new Set(); // Parsed recordings and manually supplied paths.
   let checkingAssets = false;
   let missingResults = [];          // array of required path strings currently missing
   let missingStatus = [];           // parallel array: null | 'alive' | 'gone' (set by the availability checker)
@@ -384,10 +385,14 @@
 
   function normalizePath(p){
     p = p.trim();
+    p = p.replace(/\\\//g, '/');
     // strip protocol+domain if present, keep path only
     p = p.replace(/^https?:\/\/[^\/]+\//i, '');
     p = p.replace(/^\/+/, '');
-    p = p.replace(/\\\//g, '/');
+    p = p.replace(/[?#].*$/, '');
+    const rooted = p.match(/(?:^|\/)((?:images|audio|video)\/.+)$/i);
+    if(rooted) p = rooted[1];
+    // CDN filenames are case-sensitive; lowercase is only for local matching.
     return p;
   }
 
@@ -421,7 +426,10 @@
       generatorStat.textContent = '圖資生成規則尚未載入，請重新整理網頁後再試。';
       return;
     }
-    const generated = UWAssetGenerator.generate(localFiles.map(file => file.originalPath || file.relPath));
+    const generated = UWAssetGenerator.generate([
+      ...localFiles.map(file => file.originalPath || file.relPath),
+      ...providedAssets
+    ]);
     let added = 0;
     const existing = new Set(Array.from(requiredAssets, path => path.toLowerCase()));
     generated.paths.forEach(path => {
@@ -432,12 +440,12 @@
         added++;
       }
     });
-    generatorStat.innerHTML = '已使用 <b>' + generated.ids.size + '</b> 個現有角色 ID 與選定的圖資系列，新增 <b>' + added + '</b> 筆候選圖資。按「執行比對」即可確認實際存在項目。';
+    generatorStat.innerHTML = '已使用本機與匯入清單中的 <b>' + generated.ids.size + '</b> 個角色 ID 及選定的圖資系列，新增 <b>' + added + '</b> 筆候選圖資。按「執行比對」即可確認實際存在項目。';
     updateCompareEnabled();
   }
   generateIdsBtn.addEventListener('click', addSelectedAssets);
 
-  parseBtn.addEventListener('click', function(){
+  function parseAssetInput(){
     const raw = logInput.value;
     if(!raw.trim()){
       parseStat.textContent = '請先貼上側錄內容';
@@ -458,14 +466,22 @@
       if(MEDIA_EXT.test(val)) found.add(val);
     }
 
-    found.forEach(v => requiredAssets.add(v));
+    found.forEach(path => {
+      providedAssets.add(path);
+      requiredAssets.add(path);
+      generatedAssets.delete(path); // Keep explicitly imported paths when regenerating.
+    });
+    if(localFiles.length) addSelectedAssets();
     parseStat.innerHTML = '已解析出 <b>' + requiredAssets.size + '</b> 筆不重複圖資路徑（本次貼入新增 <b>' + found.size + '</b> 筆，含重複比對）';
     updateCompareEnabled();
-  });
+  }
+  parseBtn.addEventListener('click', parseAssetInput);
 
   clearLogBtn.addEventListener('click', function(){
     logInput.value = '';
-    requiredAssets = new Set([...KNOWN_HARDCODED_ASSETS, ...generatedAssets]);
+    providedAssets.clear();
+    requiredAssets = new Set(KNOWN_HARDCODED_ASSETS);
+    refreshGeneratorState();
     parseStat.textContent = '已清空解析結果（固定資源與自動生成清單仍保留）';
     updateCompareEnabled();
   });
@@ -486,7 +502,8 @@
       logInput.value = logInput.value.trim()
         ? logInput.value + '\n\n---\n\n' + content
         : content;
-      parseStat.innerHTML = '已匯入檔案 <b>' + file.name + '</b>（' + (content.length/1024).toFixed(1) + ' KB），可以按「解析圖資清單」了';
+      parseAssetInput();
+      parseStat.textContent += '；檔案已自動匯入解析（' + (content.length/1024).toFixed(1) + ' KB）';
     };
     reader.onerror = function(){
       parseStat.textContent = '讀取檔案失敗，請重試';
@@ -512,6 +529,9 @@
     }
     const isNew = !requiredAssets.has(normalized);
     requiredAssets.add(normalized);
+    providedAssets.add(normalized);
+    generatedAssets.delete(normalized);
+    if(localFiles.length) addSelectedAssets();
     manualAddStat.innerHTML = isNew
       ? '已加入：<b>' + normalized + '</b>（目前清單共 ' + requiredAssets.size + ' 筆）'
       : '這筆本來就在清單裡了：' + normalized;
